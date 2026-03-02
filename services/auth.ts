@@ -38,7 +38,17 @@ function getHostFromExpo() {
 }
 
 export function getAuthBaseUrl() {
+  const configuredWeb = process.env.EXPO_PUBLIC_AUTH_BASE_URL_WEB?.trim();
+  const configuredNative = process.env.EXPO_PUBLIC_AUTH_BASE_URL_NATIVE?.trim();
   const configured = process.env.EXPO_PUBLIC_AUTH_BASE_URL?.trim();
+
+  if (Platform.OS === 'web' && configuredWeb) {
+    return normalizeBaseUrl(configuredWeb);
+  }
+
+  if (Platform.OS !== 'web' && configuredNative) {
+    return normalizeBaseUrl(configuredNative);
+  }
 
   if (configured) {
     return normalizeBaseUrl(configured);
@@ -58,15 +68,28 @@ export function getAuthBaseUrl() {
 }
 
 export async function signInWithGoogleMobile(idToken: string): Promise<AuthSession> {
-  const response = await fetch(`${getAuthBaseUrl()}/auth/google/mobile`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ idToken }),
-  });
+  const baseUrl = getAuthBaseUrl();
+  let response: Response;
 
-  const payload = await response.json();
+  try {
+    response = await fetch(`${baseUrl}/auth/google/mobile`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ idToken }),
+    });
+  } catch {
+    throw new Error(`Não foi possível conectar na API (${baseUrl}). Verifique rede e firewall.`);
+  }
+
+  let payload: any = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
 
   if (!response.ok) {
     const errorMessage =

@@ -111,7 +111,7 @@ export default function BottomTabNavigation({ session, onSignOut }: BottomTabNav
           fontSize: 12,
         },
         tabBarIcon: ({ color, size }) => {
-          let iconName: string;
+          let iconName: 'home-outline' | 'search-outline' | 'person-outline';
 
           if (route.name === 'Home') {
             iconName = 'home-outline';

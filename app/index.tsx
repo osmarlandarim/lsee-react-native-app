@@ -2,11 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Google from 'expo-auth-session/providers/google';
 import Constants from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     Image,
+    Platform,
     Pressable,
     SafeAreaView,
     StyleSheet,
@@ -32,17 +33,22 @@ const GOOGLE_ANDROID_CLIENT_ID =
 const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? GOOGLE_CLIENT_ID;
 const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? GOOGLE_CLIENT_ID;
 const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient';
+const IS_WEB = Platform.OS === 'web';
 
 const GOOGLE_ANDROID_CLIENT_ID_EFFECTIVE = IS_EXPO_GO
   ? GOOGLE_WEB_CLIENT_ID ?? GOOGLE_CLIENT_ID
   : GOOGLE_ANDROID_CLIENT_ID;
+const GOOGLE_CLIENT_ID_EFFECTIVE = IS_WEB
+  ? GOOGLE_WEB_CLIENT_ID ?? GOOGLE_CLIENT_ID
+  : GOOGLE_ANDROID_CLIENT_ID_EFFECTIVE;
 
 export default function IndexScreen() {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [isHydrating, setIsHydrating] = useState(true);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authFeedback, setAuthFeedback] = useState<string | null>(null);
 
-  const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
+  const [request, , promptAsync] = Google.useIdTokenAuthRequest({
     clientId: GOOGLE_CLIENT_ID,
     androidClientId: GOOGLE_ANDROID_CLIENT_ID_EFFECTIVE ?? 'MISSING_ANDROID_CLIENT_ID',
     iosClientId: GOOGLE_IOS_CLIENT_ID ?? 'MISSING_IOS_CLIENT_ID',
@@ -50,6 +56,50 @@ export default function IndexScreen() {
   });
 
   const authBaseUrl = useMemo(() => getAuthBaseUrl(), []);
+
+  const completeLoginWithIdToken = useCallback(async (idToken: string) => {
+    const nextSession = await signInWithGoogleMobile(idToken);
+    await saveStoredSession(nextSession);
+    setSession(nextSession);
+  }, []);
+
+  const processGoogleAuthResult = useCallback(async (result: any) => {
+    if (!result) {
+      setAuthFeedback('Login não retornou resposta do Google. Verifique bloqueio de pop-up no navegador.');
+      return;
+    }
+
+    if (result.type !== 'success') {
+      const providerError = result.params?.error ?? result.error?.message ?? null;
+      const feedback = providerError
+        ? `Login Google não concluído (${result.type}): ${providerError}`
+        : `Login Google não concluído (${result.type}).`;
+
+      setAuthFeedback(feedback);
+      Alert.alert('Login não concluído', feedback);
+      return;
+    }
+
+    const idToken = result.params?.id_token ?? result.authentication?.idToken;
+
+    if (!idToken) {
+      setAuthFeedback('Google autenticou, mas não retornou idToken.');
+      Alert.alert('Falha no login', 'Google autenticou, mas não retornou idToken para a API.');
+      return;
+    }
+
+    try {
+      setIsAuthenticating(true);
+      setAuthFeedback(null);
+      await completeLoginWithIdToken(idToken);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro inesperado de autenticação.';
+      setAuthFeedback(message);
+      Alert.alert('Falha no login', message);
+    } finally {
+      setIsAuthenticating(false);
+    }
+  }, [completeLoginWithIdToken]);
 
   useEffect(() => {
     async function hydrateSession() {
@@ -67,37 +117,16 @@ export default function IndexScreen() {
     hydrateSession();
   }, []);
 
-  useEffect(() => {
-    async function handleAuthResponse() {
-      if (!response || response.type !== 'success') {
-        return;
-      }
-
-      const idToken = response.params?.id_token;
-
-      if (!idToken) {
-        Alert.alert('Falha no login', 'Não foi possível obter idToken do Google.');
-        return;
-      }
-
-      try {
-        setIsAuthenticating(true);
-
-        const nextSession = await signInWithGoogleMobile(idToken);
-
-        await saveStoredSession(nextSession);
-        setSession(nextSession);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Erro inesperado de autenticação.';
-
-        Alert.alert('Falha no login', message);
-      } finally {
-        setIsAuthenticating(false);
-      }
+  const handleGoogleSignInPress = useCallback(async () => {
+    try {
+      const result = await promptAsync();
+      await processGoogleAuthResult(result);
+    } catch {
+      const feedback = 'Não foi possível iniciar o login Google. Verifique bloqueio de pop-up e tente novamente.';
+      setAuthFeedback(feedback);
+      Alert.alert('Login não concluído', feedback);
     }
-
-    handleAuthResponse();
-  }, [response]);
+  }, [processGoogleAuthResult, promptAsync]);
 
   async function handleSignOut() {
     await clearStoredSession();
@@ -117,7 +146,7 @@ export default function IndexScreen() {
     return <BottomTabNavigation session={session} onSignOut={handleSignOut} />;
   }
 
-  const isGoogleConfigMissing = !GOOGLE_ANDROID_CLIENT_ID_EFFECTIVE;
+  const isGoogleConfigMissing = !GOOGLE_CLIENT_ID_EFFECTIVE;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -128,7 +157,7 @@ export default function IndexScreen() {
 
         <Pressable
           disabled={!request || isAuthenticating || isGoogleConfigMissing}
-          onPress={() => promptAsync()}
+          onPress={handleGoogleSignInPress}
           style={({ pressed }) => [
             styles.googleButton,
             pressed && styles.googleButtonPressed,
@@ -147,11 +176,22 @@ export default function IndexScreen() {
 
         <Text style={styles.baseUrlText}>API: {authBaseUrl}/auth/google/mobile</Text>
 
+        {IS_WEB ? (
+          <Text style={styles.baseUrlText}>
+            Web OAuth: configure no Google Cloud o origin e redirect URI para o endereço atual
+            (ex.: http://localhost:19027).
+          </Text>
+        ) : null}
+
+        {authFeedback ? <Text style={styles.warningText}>{authFeedback}</Text> : null}
+
         {isGoogleConfigMissing ? (
           <Text style={styles.warningText}>
             {IS_EXPO_GO
               ? 'No Expo Go, defina EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (ou EXPO_PUBLIC_GOOGLE_CLIENT_ID).'
-              : 'Defina EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID (ou EXPO_PUBLIC_GOOGLE_CLIENT_ID) no app para habilitar login Google no Android.'}
+              : IS_WEB
+                ? 'No Web, defina EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (ou EXPO_PUBLIC_GOOGLE_CLIENT_ID).'
+                : 'Defina EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID (ou EXPO_PUBLIC_GOOGLE_CLIENT_ID) no app para habilitar login Google no Android.'}
           </Text>
         ) : null}
       </View>
