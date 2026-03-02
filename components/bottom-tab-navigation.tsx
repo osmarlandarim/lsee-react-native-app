@@ -1,7 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import * as ImagePicker from 'expo-image-picker';
+import * as SecureStore from 'expo-secure-store';
 import React, { useCallback, useEffect, useState } from 'react';
-import { FlatList, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { apiFetchAuth } from '@/services/api-client';
@@ -119,6 +121,8 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   const { profile } = session;
   const [stravaStatus, setStravaStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
   const [stravaFeedback, setStravaFeedback] = useState<string | null>(null);
+  const [coverPhotoUri, setCoverPhotoUri] = useState<string | null>(null);
+  const coverPhotoStorageKey = `lsee.cover_photo.${profile.usuarioId}`;
 
   const loadStravaStatus = useCallback(async () => {
     try {
@@ -190,6 +194,34 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
     };
   }, [processStravaCallbackUrl, loadStravaStatus]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadStoredCoverPhoto() {
+      try {
+        const storedCoverPhotoUri = await SecureStore.getItemAsync(coverPhotoStorageKey);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setCoverPhotoUri(storedCoverPhotoUri ?? null);
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+
+        setCoverPhotoUri(null);
+      }
+    }
+
+    void loadStoredCoverPhoto();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [coverPhotoStorageKey]);
+
   async function handleStravaLogin() {
     try {
       setStravaFeedback(null);
@@ -202,11 +234,77 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
     }
   }
 
+  async function handleSelectCoverPhoto() {
+    if (Platform.OS !== 'web') {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        setStravaFeedback('Permita acesso à galeria para selecionar a foto de capa.');
+        return;
+      }
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      quality: 0.9,
+      aspect: [16, 7],
+    });
+
+    if (result.canceled || !result.assets?.[0]?.uri) {
+      return;
+    }
+
+    const nextCoverPhotoUri = result.assets[0].uri;
+    setCoverPhotoUri(nextCoverPhotoUri);
+
+    try {
+      await SecureStore.setItemAsync(coverPhotoStorageKey, nextCoverPhotoUri);
+    } catch {
+      setStravaFeedback('A foto de capa foi aplicada, mas não foi possível salvar no dispositivo.');
+    }
+  }
+
+  async function handleRemoveCoverPhoto() {
+    setCoverPhotoUri(null);
+
+    try {
+      await SecureStore.deleteItemAsync(coverPhotoStorageKey);
+    } catch {
+      setStravaFeedback('A foto de capa foi removida, mas não foi possível atualizar o armazenamento local.');
+    }
+  }
+
   return (
-    <View style={styles.profileScreen}>
-      {profile.picture ? <Image source={{ uri: profile.picture }} style={styles.avatar} /> : null}
-      <Text style={styles.title}>{profile.name ?? 'Usuário'}</Text>
-      <Text style={styles.profileEmail}>{profile.email ?? 'E-mail não disponível'}</Text>
+    <ScrollView style={styles.profileScreen} contentContainerStyle={styles.profileContent}>
+      <View style={styles.coverPhotoContainer}>
+        <Pressable
+          onPress={handleSelectCoverPhoto}
+          style={({ pressed }) => [styles.coverPhotoTouchArea, pressed && styles.coverPhotoTouchAreaPressed]}>
+          {coverPhotoUri ? (
+            <Image source={{ uri: coverPhotoUri }} style={styles.coverPhotoImage} />
+          ) : (
+            <View style={styles.coverPhotoPlaceholder}>
+              <Ionicons name="image-outline" size={28} color="#6B7280" />
+              <Text style={styles.coverPhotoPlaceholderText}>Selecionar foto de capa</Text>
+            </View>
+          )}
+        </Pressable>
+
+        {coverPhotoUri ? (
+          <Pressable
+            onPress={handleRemoveCoverPhoto}
+            style={({ pressed }) => [styles.removeCoverIconButton, pressed && styles.removeCoverIconButtonPressed]}>
+            <Ionicons name="close" size={16} color="#111827" />
+          </Pressable>
+        ) : null}
+      </View>
+
+      <View style={styles.profileHeaderBlock}>
+        {profile.picture ? <Image source={{ uri: profile.picture }} style={styles.avatar} /> : null}
+        <Text style={styles.title}>{profile.name ?? 'Usuário'}</Text>
+        <Text style={styles.profileEmail}>{profile.email ?? 'E-mail não disponível'}</Text>
+      </View>
 
       <Pressable
         onPress={handleStravaLogin}
@@ -221,7 +319,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
       <Pressable onPress={onSignOut} style={({ pressed }) => [styles.signOutButton, pressed && styles.signOutButtonPressed]}>
         <Text style={styles.signOutButtonText}>Sair</Text>
       </Pressable>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -245,6 +343,10 @@ export default function BottomTabNavigation({ session, onSignOut }: BottomTabNav
           fontSize: 12,
         },
         tabBarIcon: ({ color, size }) => {
+          if (route.name === 'Perfil' && session.profile.picture) {
+            return <Image source={{ uri: session.profile.picture }} style={styles.tabAvatar} />;
+          }
+
           let iconName: 'home-outline' | 'search-outline' | 'person-outline';
 
           if (route.name === 'Home') {
@@ -260,7 +362,14 @@ export default function BottomTabNavigation({ session, onSignOut }: BottomTabNav
       })}>
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Busca" component={BuscaScreen} />
-      <Tab.Screen name="Perfil">
+      <Tab.Screen
+        name="Perfil"
+        options={{
+          tabBarLabel: () => null,
+          tabBarIconStyle: {
+            marginTop: 4,
+          },
+        }}>
         {() => <PerfilScreen session={session} onSignOut={onSignOut} />}
       </Tab.Screen>
     </Tab.Navigator>
@@ -329,16 +438,74 @@ const styles = StyleSheet.create({
   },
   profileScreen: {
     flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  profileContent: {
+    alignItems: 'center',
+    paddingBottom: 28,
+  },
+  coverPhotoContainer: {
+    width: '100%',
+    height: 170,
+    backgroundColor: '#F3F4F6',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  coverPhotoTouchArea: {
+    width: '100%',
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  coverPhotoTouchAreaPressed: {
+    opacity: 0.9,
+  },
+  coverPhotoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  coverPhotoPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  coverPhotoPlaceholderText: {
+    color: '#4B5563',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  removeCoverIconButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeCoverIconButtonPressed: {
+    opacity: 0.8,
+  },
+  profileHeaderBlock: {
+    alignItems: 'center',
+    marginTop: -42,
     paddingHorizontal: 24,
-    backgroundColor: '#FFFFFF',
   },
   avatar: {
     width: 88,
     height: 88,
     borderRadius: 44,
     marginBottom: 14,
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
+    backgroundColor: '#E5E7EB',
+  },
+  tabAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
   },
   profileEmail: {
     marginTop: 8,
