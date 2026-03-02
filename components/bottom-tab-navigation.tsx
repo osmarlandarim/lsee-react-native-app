@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import React, { useEffect, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { apiFetchAuth } from '@/services/api-client';
-import type { AuthSession } from '@/services/auth';
+import { getAuthBaseUrl, type AuthSession } from '@/services/auth';
 
 type RootTabParamList = {
   Home: undefined;
@@ -77,12 +77,106 @@ function BuscaScreen() {
 
 function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   const { profile } = session;
+  const [stravaStatus, setStravaStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
+  const [stravaFeedback, setStravaFeedback] = useState<string | null>(null);
+
+  const loadStravaStatus = useCallback(async () => {
+    try {
+      const response = await apiFetchAuth('/strava/status?returnTo=/inicio');
+
+      if (!response.ok) {
+        setStravaStatus('disconnected');
+        setStravaFeedback('Não foi possível consultar status do Strava.');
+        return;
+      }
+
+      const payload = (await response.json()) as { authenticated?: boolean };
+      setStravaStatus(payload.authenticated ? 'connected' : 'disconnected');
+    } catch {
+      setStravaStatus('disconnected');
+      setStravaFeedback('Erro ao consultar status do Strava.');
+    }
+  }, []);
+
+  const processStravaCallbackUrl = useCallback((url: string) => {
+    const [, queryString = ''] = url.split('?');
+    const params = new URLSearchParams(queryString);
+    const stravaState = params.get('strava');
+
+    if (stravaState === 'connected') {
+      setStravaFeedback('Strava conectado com sucesso.');
+      setStravaStatus('connected');
+      void loadStravaStatus();
+      return;
+    }
+
+    if (stravaState === 'error') {
+      const reason = params.get('reason');
+      setStravaFeedback(reason ? `Falha ao conectar com Strava (${reason}).` : 'Falha ao conectar com Strava.');
+      setStravaStatus('disconnected');
+      return;
+    }
+
+    if (stravaState === 'disconnected') {
+      setStravaFeedback('Strava desconectado.');
+      setStravaStatus('disconnected');
+    }
+  }, [loadStravaStatus]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    void loadStravaStatus();
+
+    const subscription = Linking.addEventListener('url', (event) => {
+      if (!isMounted) {
+        return;
+      }
+
+      processStravaCallbackUrl(event.url);
+    });
+
+    void Linking.getInitialURL().then((initialUrl) => {
+      if (!isMounted || !initialUrl) {
+        return;
+      }
+
+      processStravaCallbackUrl(initialUrl);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.remove();
+    };
+  }, [processStravaCallbackUrl, loadStravaStatus]);
+
+  async function handleStravaLogin() {
+    try {
+      setStravaFeedback(null);
+
+      const authUrl = `${getAuthBaseUrl()}/strava/auth?userToken=${encodeURIComponent(session.accessToken)}&returnTo=${encodeURIComponent('/inicio')}`;
+
+      await Linking.openURL(authUrl);
+    } catch {
+      setStravaFeedback('Não foi possível abrir o login do Strava.');
+    }
+  }
 
   return (
     <View style={styles.profileScreen}>
       {profile.picture ? <Image source={{ uri: profile.picture }} style={styles.avatar} /> : null}
       <Text style={styles.title}>{profile.name ?? 'Usuário'}</Text>
       <Text style={styles.profileEmail}>{profile.email ?? 'E-mail não disponível'}</Text>
+
+      <Pressable
+        onPress={handleStravaLogin}
+        style={({ pressed }) => [styles.stravaButton, pressed && styles.stravaButtonPressed]}>
+        <Text style={styles.stravaButtonText}>
+          {stravaStatus === 'connected' ? 'Conectado ao Strava' : stravaStatus === 'loading' ? 'Verificando Strava...' : 'Conectar com Strava'}
+        </Text>
+      </Pressable>
+
+      {stravaFeedback ? <Text style={styles.profileFeedback}>{stravaFeedback}</Text> : null}
 
       <Pressable onPress={onSignOut} style={({ pressed }) => [styles.signOutButton, pressed && styles.signOutButtonPressed]}>
         <Text style={styles.signOutButtonText}>Sair</Text>
@@ -172,6 +266,30 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 14,
     color: '#6B7280',
+  },
+  stravaButton: {
+    marginTop: 18,
+    height: 44,
+    minWidth: 220,
+    borderRadius: 8,
+    backgroundColor: '#FC4C02',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  stravaButtonPressed: {
+    opacity: 0.9,
+  },
+  stravaButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  profileFeedback: {
+    marginTop: 10,
+    fontSize: 12,
+    color: '#B91C1C',
+    textAlign: 'center',
   },
   signOutButton: {
     marginTop: 24,
