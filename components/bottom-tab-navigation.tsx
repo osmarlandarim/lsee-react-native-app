@@ -12,7 +12,7 @@ import { getAuthBaseUrl, type AuthSession } from '@/services/auth';
 type RootTabParamList = {
   Home: undefined;
   Busca: undefined;
-  Perfil: undefined;
+  MinhaConta: undefined;
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
@@ -119,6 +119,7 @@ function BuscaScreen() {
 
 function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   const { profile } = session;
+  const [accountView, setAccountView] = useState<'menu' | 'connected-apps'>('menu');
   const [stravaStatus, setStravaStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
   const [stravaFeedback, setStravaFeedback] = useState<string | null>(null);
   const [coverPhotoUri, setCoverPhotoUri] = useState<string | null>(null);
@@ -277,48 +278,70 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
 
   return (
     <ScrollView style={styles.profileScreen} contentContainerStyle={styles.profileContent}>
-      <View style={styles.coverPhotoContainer}>
-        <Pressable
-          onPress={handleSelectCoverPhoto}
-          style={({ pressed }) => [styles.coverPhotoTouchArea, pressed && styles.coverPhotoTouchAreaPressed]}>
-          {coverPhotoUri ? (
-            <Image source={{ uri: coverPhotoUri }} style={styles.coverPhotoImage} />
-          ) : (
-            <View style={styles.coverPhotoPlaceholder}>
-              <Ionicons name="image-outline" size={28} color="#6B7280" />
-              <Text style={styles.coverPhotoPlaceholderText}>Selecionar foto de capa</Text>
-            </View>
-          )}
-        </Pressable>
+      {accountView === 'menu' ? (
+        <>
+          <View style={styles.coverPhotoContainer}>
+            <Pressable
+              onPress={handleSelectCoverPhoto}
+              style={({ pressed }) => [styles.coverPhotoTouchArea, pressed && styles.coverPhotoTouchAreaPressed]}>
+              {coverPhotoUri ? (
+                <Image source={{ uri: coverPhotoUri }} style={styles.coverPhotoImage} />
+              ) : (
+                <View style={styles.coverPhotoPlaceholder}>
+                  <Ionicons name="image-outline" size={28} color="#6B7280" />
+                  <Text style={styles.coverPhotoPlaceholderText}>Selecionar foto de capa</Text>
+                </View>
+              )}
+            </Pressable>
 
-        {coverPhotoUri ? (
-          <Pressable
-            onPress={handleRemoveCoverPhoto}
-            style={({ pressed }) => [styles.removeCoverIconButton, pressed && styles.removeCoverIconButtonPressed]}>
-            <Ionicons name="close" size={16} color="#111827" />
+            {coverPhotoUri ? (
+              <Pressable
+                onPress={handleRemoveCoverPhoto}
+                style={({ pressed }) => [styles.removeCoverIconButton, pressed && styles.removeCoverIconButtonPressed]}>
+                <Ionicons name="close" size={16} color="#111827" />
+              </Pressable>
+            ) : null}
+          </View>
+
+          <View style={styles.profileHeaderBlock}>
+            {profile.picture ? <Image source={{ uri: profile.picture }} style={styles.avatar} /> : null}
+            <Text style={styles.title}>{profile.name ?? 'Usuário'}</Text>
+            <Text style={styles.profileEmail}>{profile.email ?? 'E-mail não disponível'}</Text>
+          </View>
+
+          <View style={styles.accountMenuList}>
+            <Pressable
+              onPress={() => setAccountView('connected-apps')}
+              style={({ pressed }) => [styles.accountMenuItem, pressed && styles.accountMenuItemPressed]}>
+              <Text style={styles.accountMenuText}>Aplicativos Conectados</Text>
+              <Ionicons name="chevron-forward" size={20} color="#6B7280" />
+            </Pressable>
+          </View>
+
+          <Pressable onPress={onSignOut} style={({ pressed }) => [styles.signOutButton, pressed && styles.signOutButtonPressed]}>
+            <Text style={styles.signOutButtonText}>Sair</Text>
           </Pressable>
-        ) : null}
-      </View>
+        </>
+      ) : (
+        <View style={styles.connectedAppsScreen}>
+          <View style={styles.connectedAppsHeader}>
+            <Pressable onPress={() => setAccountView('menu')} style={styles.connectedAppsBackButton}>
+              <Ionicons name="chevron-back" size={20} color="#111827" />
+            </Pressable>
+            <Text style={styles.connectedAppsTitle}>Aplicativos Conectados</Text>
+          </View>
 
-      <View style={styles.profileHeaderBlock}>
-        {profile.picture ? <Image source={{ uri: profile.picture }} style={styles.avatar} /> : null}
-        <Text style={styles.title}>{profile.name ?? 'Usuário'}</Text>
-        <Text style={styles.profileEmail}>{profile.email ?? 'E-mail não disponível'}</Text>
-      </View>
+          <Pressable
+            onPress={handleStravaLogin}
+            style={({ pressed }) => [styles.stravaButton, pressed && styles.stravaButtonPressed]}>
+            <Text style={styles.stravaButtonText}>
+              {stravaStatus === 'connected' ? 'Conectado ao Strava' : stravaStatus === 'loading' ? 'Verificando Strava...' : 'Conectar com Strava'}
+            </Text>
+          </Pressable>
 
-      <Pressable
-        onPress={handleStravaLogin}
-        style={({ pressed }) => [styles.stravaButton, pressed && styles.stravaButtonPressed]}>
-        <Text style={styles.stravaButtonText}>
-          {stravaStatus === 'connected' ? 'Conectado ao Strava' : stravaStatus === 'loading' ? 'Verificando Strava...' : 'Conectar com Strava'}
-        </Text>
-      </Pressable>
-
-      {stravaFeedback ? <Text style={styles.profileFeedback}>{stravaFeedback}</Text> : null}
-
-      <Pressable onPress={onSignOut} style={({ pressed }) => [styles.signOutButton, pressed && styles.signOutButtonPressed]}>
-        <Text style={styles.signOutButtonText}>Sair</Text>
-      </Pressable>
+          {stravaFeedback ? <Text style={styles.profileFeedback}>{stravaFeedback}</Text> : null}
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -343,7 +366,7 @@ export default function BottomTabNavigation({ session, onSignOut }: BottomTabNav
           fontSize: 12,
         },
         tabBarIcon: ({ color, size }) => {
-          if (route.name === 'Perfil' && session.profile.picture) {
+          if (route.name === 'MinhaConta' && session.profile.picture) {
             return <Image source={{ uri: session.profile.picture }} style={styles.tabAvatar} />;
           }
 
@@ -363,8 +386,9 @@ export default function BottomTabNavigation({ session, onSignOut }: BottomTabNav
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Busca" component={BuscaScreen} />
       <Tab.Screen
-        name="Perfil"
+        name="MinhaConta"
         options={{
+          title: 'Minha Conta',
           tabBarLabel: () => null,
           tabBarIconStyle: {
             marginTop: 4,
@@ -443,6 +467,54 @@ const styles = StyleSheet.create({
   profileContent: {
     alignItems: 'center',
     paddingBottom: 28,
+  },
+  accountMenuList: {
+    width: '100%',
+    marginTop: 18,
+    paddingHorizontal: 16,
+  },
+  accountMenuItem: {
+    height: 52,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  accountMenuItemPressed: {
+    opacity: 0.8,
+  },
+  accountMenuText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  connectedAppsScreen: {
+    width: '100%',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    alignItems: 'center',
+  },
+  connectedAppsHeader: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  connectedAppsBackButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  connectedAppsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
   },
   coverPhotoContainer: {
     width: '100%',
