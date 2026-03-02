@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { apiFetchAuth } from '@/services/api-client';
@@ -20,9 +20,16 @@ type BottomTabNavigationProps = {
   onSignOut: () => void;
 };
 
-function HomeScreen({ session }: Pick<BottomTabNavigationProps, 'session'>) {
-  const userName = session.profile.name?.trim() || 'Usuário';
-  const [apiStatus, setApiStatus] = useState('Validando API...');
+type BikeItem = {
+  id: string;
+  apelido?: string | null;
+  totalKm?: number | null;
+  principal?: boolean | null;
+};
+
+function HomeScreen() {
+  const [bikes, setBikes] = useState<BikeItem[]>([]);
+  const [bikesStatus, setBikesStatus] = useState('Carregando bikes...');
 
   useEffect(() => {
     let isMounted = true;
@@ -36,18 +43,36 @@ function HomeScreen({ session }: Pick<BottomTabNavigationProps, 'session'>) {
         }
 
         if (!response.ok) {
-          setApiStatus(`API respondeu ${response.status}`);
+          setBikesStatus(`API respondeu ${response.status}`);
           return;
         }
 
-        setApiStatus('API autenticada conectada');
+        const bikesResponse = await apiFetchAuth('/bikes');
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (!bikesResponse.ok) {
+          setBikesStatus(`Não foi possível carregar bikes (${bikesResponse.status}).`);
+          return;
+        }
+
+        const bikesPayload = (await bikesResponse.json()) as BikeItem[];
+        setBikes(Array.isArray(bikesPayload) ? bikesPayload : []);
+        setBikesStatus(
+          Array.isArray(bikesPayload) && bikesPayload.length > 0
+            ? 'Bikes carregadas'
+            : 'Nenhuma bike cadastrada.'
+        );
       } catch (error) {
         if (!isMounted) {
           return;
         }
 
         const message = error instanceof Error ? error.message : 'Erro ao validar API';
-        setApiStatus(message);
+        setBikesStatus(message);
+        setBikesStatus('Erro ao carregar bikes.');
       }
     }
 
@@ -59,10 +84,25 @@ function HomeScreen({ session }: Pick<BottomTabNavigationProps, 'session'>) {
   }, []);
 
   return (
-    <View style={styles.screen}>
+    <View style={styles.homeScreen}>
       <Text style={styles.title}>Home</Text>
-      <Text style={styles.homeGreeting}>Olá, {userName}</Text>
-      <Text style={styles.apiStatusText}>{apiStatus}</Text>
+
+      <Text style={styles.bikesStatusText}>{bikesStatus}</Text>
+
+      <FlatList
+        data={bikes}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.bikesList}
+        renderItem={({ item }) => (
+          <View style={styles.bikeCard}>
+            <View style={styles.bikeHeaderRow}>
+              <Text style={styles.bikeName}>{item.apelido?.trim() || 'Bike sem apelido'}</Text>
+              {item.principal ? <Text style={styles.bikePrincipal}>Principal</Text> : null}
+            </View>
+            <Text style={styles.bikeKm}>{`${Number(item.totalKm ?? 0).toFixed(1)} km`}</Text>
+          </View>
+        )}
+      />
     </View>
   );
 }
@@ -218,7 +258,7 @@ export default function BottomTabNavigation({ session, onSignOut }: BottomTabNav
           return <Ionicons name={iconName} size={size} color={color} />;
         },
       })}>
-      <Tab.Screen name="Home">{() => <HomeScreen session={session} />}</Tab.Screen>
+      <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Busca" component={BuscaScreen} />
       <Tab.Screen name="Perfil">
         {() => <PerfilScreen session={session} onSignOut={onSignOut} />}
@@ -234,19 +274,57 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
   },
+  homeScreen: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    paddingTop: 48,
+    paddingHorizontal: 18,
+  },
   title: {
     fontSize: 24,
     fontWeight: '600',
     color: '#111111',
   },
-  homeGreeting: {
-    marginTop: 8,
-    fontSize: 16,
-    color: '#6B7280',
-  },
-  apiStatusText: {
+  bikesStatusText: {
     marginTop: 10,
     fontSize: 13,
+    color: '#6B7280',
+  },
+  bikesList: {
+    paddingTop: 10,
+    paddingBottom: 24,
+    gap: 10,
+  },
+  bikeCard: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    padding: 12,
+    backgroundColor: '#FFFFFF',
+  },
+  bikeHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  bikeName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  bikePrincipal: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#065F46',
+    backgroundColor: '#D1FAE5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  bikeKm: {
+    marginTop: 8,
+    fontSize: 14,
     color: '#374151',
   },
   profileScreen: {
