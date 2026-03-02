@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { Picker } from '@react-native-picker/picker';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import * as ImagePicker from 'expo-image-picker';
 import * as ExpoLinking from 'expo-linking';
@@ -736,29 +737,44 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
 
               <View style={styles.personalDataFieldBlock}>
                 <Text style={styles.personalDataFieldLabel}>dataNascimento (dd/MM/yyyy)</Text>
-                <Pressable
-                  onPress={() => setBirthDatePickerVisible(true)}
-                  style={({ pressed }) => [styles.personalDataDateInput, pressed && styles.personalDataDateInputPressed]}>
-                  <Text
-                    style={
-                      personalDataForm.dataNascimento
-                        ? styles.personalDataDateValue
-                        : styles.personalDataDatePlaceholder
-                    }>
-                    {personalDataForm.dataNascimento || 'dd/MM/yyyy'}
-                  </Text>
-                  <Ionicons name="calendar-outline" size={18} color="#6B7280" />
-                </Pressable>
+                {Platform.OS === 'web' ? (
+                  <View style={styles.webDatePickerBlock}>
+                    <DateTimePicker
+                      mode="date"
+                      display="default"
+                      value={birthDatePickerValue}
+                      maximumDate={new Date()}
+                      onChange={handleBirthDateChange}
+                    />
+                    <Text style={styles.personalDataDateValue}>{personalDataForm.dataNascimento || 'dd/MM/yyyy'}</Text>
+                  </View>
+                ) : (
+                  <>
+                    <Pressable
+                      onPress={() => setBirthDatePickerVisible(true)}
+                      style={({ pressed }) => [styles.personalDataDateInput, pressed && styles.personalDataDateInputPressed]}>
+                      <Text
+                        style={
+                          personalDataForm.dataNascimento
+                            ? styles.personalDataDateValue
+                            : styles.personalDataDatePlaceholder
+                        }>
+                        {personalDataForm.dataNascimento || 'dd/MM/yyyy'}
+                      </Text>
+                      <Ionicons name="calendar-outline" size={18} color="#6B7280" />
+                    </Pressable>
 
-                {birthDatePickerVisible ? (
-                  <DateTimePicker
-                    mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                    value={birthDatePickerValue}
-                    maximumDate={new Date()}
-                    onChange={handleBirthDateChange}
-                  />
-                ) : null}
+                    {birthDatePickerVisible ? (
+                      <DateTimePicker
+                        mode="date"
+                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                        value={birthDatePickerValue}
+                        maximumDate={new Date()}
+                        onChange={handleBirthDateChange}
+                      />
+                    ) : null}
+                  </>
+                )}
               </View>
 
               <View style={styles.personalDataFieldBlock}>
@@ -766,25 +782,15 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
                 {isLoadingLookupOptions ? (
                   <Text style={styles.personalDataInfoText}>Carregando opções de gênero...</Text>
                 ) : generoOptions.length > 0 ? (
-                  <View style={styles.lookupOptionsWrap}>
-                    {generoOptions.map((item) => {
-                      const isSelected = personalDataForm.idGenero === item.id;
-
-                      return (
-                        <Pressable
-                          key={item.id}
-                          onPress={() => setPersonalDataForm((prev) => ({ ...prev, idGenero: item.id }))}
-                          style={({ pressed }) => [
-                            styles.lookupOptionItem,
-                            isSelected && styles.lookupOptionItemSelected,
-                            pressed && styles.lookupOptionItemPressed,
-                          ]}>
-                          <Text style={[styles.lookupOptionText, isSelected && styles.lookupOptionTextSelected]}>
-                            {item.descricao || item.codigo}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
+                  <View style={styles.pickerContainer}>
+                    <Picker
+                      selectedValue={personalDataForm.idGenero}
+                      onValueChange={(value) => setPersonalDataForm((prev) => ({ ...prev, idGenero: String(value ?? '') }))}>
+                      <Picker.Item label="Selecione" value="" />
+                      {generoOptions.map((item) => (
+                        <Picker.Item key={item.id} label={item.descricao || item.codigo} value={item.id} />
+                      ))}
+                    </Picker>
                   </View>
                 ) : (
                   <TextInput
@@ -828,25 +834,15 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
                 {isLoadingLookupOptions ? (
                   <Text style={styles.personalDataInfoText}>Carregando tipos de contato...</Text>
                 ) : tipoContatoOptions.length > 0 ? (
-                  <View style={styles.lookupOptionsWrap}>
-                    {tipoContatoOptions.map((item) => {
-                      const isSelected = personalDataForm.idTipoContato === item.id;
-
-                      return (
-                        <Pressable
-                          key={item.id}
-                          onPress={() => setPersonalDataForm((prev) => ({ ...prev, idTipoContato: item.id }))}
-                          style={({ pressed }) => [
-                            styles.lookupOptionItem,
-                            isSelected && styles.lookupOptionItemSelected,
-                            pressed && styles.lookupOptionItemPressed,
-                          ]}>
-                          <Text style={[styles.lookupOptionText, isSelected && styles.lookupOptionTextSelected]}>
-                            {item.descricao || item.codigo}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
+                  <View style={styles.pickerContainer}>
+                    <Picker
+                      selectedValue={personalDataForm.idTipoContato}
+                      onValueChange={(value) => setPersonalDataForm((prev) => ({ ...prev, idTipoContato: String(value ?? '') }))}>
+                      <Picker.Item label="Selecione" value="" />
+                      {tipoContatoOptions.map((item) => (
+                        <Picker.Item key={item.id} label={item.descricao || item.codigo} value={item.id} />
+                      ))}
+                    </Picker>
                   </View>
                 ) : (
                   <TextInput
@@ -1119,34 +1115,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#111827',
   },
-  lookupOptionsWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  lookupOptionItem: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 8,
+  pickerContainer: {
     borderWidth: 1,
     borderColor: '#D1D5DB',
+    borderRadius: 8,
     backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
   },
-  lookupOptionItemSelected: {
-    borderColor: '#2563EB',
-    backgroundColor: '#EFF6FF',
-  },
-  lookupOptionItemPressed: {
-    opacity: 0.85,
-  },
-  lookupOptionText: {
-    fontSize: 13,
-    color: '#374151',
-    fontWeight: '500',
-  },
-  lookupOptionTextSelected: {
-    color: '#1D4ED8',
-    fontWeight: '700',
+  webDatePickerBlock: {
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    gap: 8,
   },
   personalDataInput: {
     height: 44,
