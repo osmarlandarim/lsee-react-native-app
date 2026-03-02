@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import * as ImagePicker from 'expo-image-picker';
 import * as ExpoLinking from 'expo-linking';
@@ -83,7 +84,7 @@ function mapDadosPessoaisToForm(data: DadosPessoaisApi): DadosPessoaisForm {
 
   return {
     apelido: data.apelido ?? '',
-    dataNascimento: dataNascimento ? dataNascimento.slice(0, 10) : '',
+    dataNascimento: formatDateToDisplay(dataNascimento),
     idGenero: data.idGenero ?? '',
     altura: data.altura !== undefined && data.altura !== null ? String(data.altura) : '',
     peso: data.peso !== undefined && data.peso !== null ? String(data.peso) : '',
@@ -92,6 +93,54 @@ function mapDadosPessoaisToForm(data: DadosPessoaisApi): DadosPessoaisForm {
     contatoEmail: firstContato?.email ?? '',
     contatoTelefone: firstContato?.telefone ?? '',
   };
+}
+
+function formatDateToDisplay(value: string) {
+  if (!value) {
+    return '';
+  }
+
+  const rawDate = value.includes('T') ? value.split('T')[0] : value;
+  const [year, month, day] = rawDate.split('-');
+
+  if (!year || !month || !day) {
+    return '';
+  }
+
+  return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
+}
+
+function formatDateToApi(value: string) {
+  const [day, month, year] = value.split('/');
+
+  if (!day || !month || !year) {
+    return null;
+  }
+
+  if (day.length !== 2 || month.length !== 2 || year.length !== 4) {
+    return null;
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function parseDisplayDate(value: string) {
+  const apiDate = formatDateToApi(value);
+
+  if (!apiDate) {
+    return null;
+  }
+
+  const parsed = new Date(`${apiDate}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDateFromPicker(date: Date) {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = String(date.getFullYear());
+
+  return `${day}/${month}/${year}`;
 }
 
 function HomeScreen() {
@@ -190,6 +239,8 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   const [coverPhotoUri, setCoverPhotoUri] = useState<string | null>(null);
   const [personalDataId, setPersonalDataId] = useState<string | null>(null);
   const [personalDataForm, setPersonalDataForm] = useState<DadosPessoaisForm>(createEmptyDadosPessoaisForm);
+  const [birthDatePickerVisible, setBirthDatePickerVisible] = useState(false);
+  const [birthDatePickerValue, setBirthDatePickerValue] = useState<Date>(new Date(2000, 0, 1));
   const [generoOptions, setGeneroOptions] = useState<LookupOption[]>([]);
   const [tipoContatoOptions, setTipoContatoOptions] = useState<LookupOption[]>([]);
   const [isLoadingPersonalData, setIsLoadingPersonalData] = useState(false);
@@ -402,13 +453,16 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
       if (!firstItem) {
         setPersonalDataId(null);
         setPersonalDataForm(createEmptyDadosPessoaisForm());
+        setBirthDatePickerValue(new Date(2000, 0, 1));
         setPersonalDataFeedback('Nenhum dado pessoal encontrado para este usuário.');
         return;
       }
 
       const id = firstItem.id;
       setPersonalDataId(id !== undefined && id !== null ? String(id) : null);
-      setPersonalDataForm(mapDadosPessoaisToForm(firstItem as DadosPessoaisApi));
+      const mapped = mapDadosPessoaisToForm(firstItem as DadosPessoaisApi);
+      setPersonalDataForm(mapped);
+      setBirthDatePickerValue(parseDisplayDate(mapped.dataNascimento) ?? new Date(2000, 0, 1));
     } catch {
       setPersonalDataFeedback('Erro ao carregar Dados Pessoais.');
     } finally {
@@ -478,6 +532,13 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
         return;
       }
 
+      const normalizedBirthDate = formatDateToApi(personalDataForm.dataNascimento.trim());
+
+      if (!normalizedBirthDate) {
+        setPersonalDataFeedback('Data de nascimento inválida. Use o calendário para selecionar a data.');
+        return;
+      }
+
       const hasAnyContato =
         personalDataForm.idTipoContato.trim() ||
         personalDataForm.contatoNome.trim() ||
@@ -497,7 +558,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
 
       const payload: Record<string, unknown> = {
         apelido: personalDataForm.apelido.trim(),
-        dataNascimento: personalDataForm.dataNascimento.trim(),
+        dataNascimento: normalizedBirthDate,
         idGenero: personalDataForm.idGenero.trim(),
         altura: personalDataForm.altura.trim(),
         peso: personalDataForm.peso.trim(),
@@ -541,7 +602,9 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
         setPersonalDataId(String(savedId));
       }
 
-      setPersonalDataForm(mapDadosPessoaisToForm(saved));
+      const mapped = mapDadosPessoaisToForm(saved);
+      setPersonalDataForm(mapped);
+      setBirthDatePickerValue(parseDisplayDate(mapped.dataNascimento) ?? new Date(2000, 0, 1));
       setPersonalDataFeedback('Dados Pessoais salvos com sucesso.');
     } catch {
       setPersonalDataFeedback('Erro ao salvar Dados Pessoais.');
@@ -554,6 +617,22 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
     setAccountView('personal-data');
     void loadPersonalData();
     void loadLookupOptions();
+  }
+
+  function handleBirthDateChange(event: DateTimePickerEvent, selectedDate?: Date) {
+    if (Platform.OS === 'android') {
+      setBirthDatePickerVisible(false);
+    }
+
+    if (event.type === 'dismissed' || !selectedDate) {
+      return;
+    }
+
+    setBirthDatePickerValue(selectedDate);
+    setPersonalDataForm((prev) => ({
+      ...prev,
+      dataNascimento: formatDateFromPicker(selectedDate),
+    }));
   }
 
   return (
@@ -656,14 +735,30 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
               </View>
 
               <View style={styles.personalDataFieldBlock}>
-                <Text style={styles.personalDataFieldLabel}>dataNascimento (AAAA-MM-DD)</Text>
-                <TextInput
-                  value={personalDataForm.dataNascimento}
-                  onChangeText={(text) => setPersonalDataForm((prev) => ({ ...prev, dataNascimento: text }))}
-                  style={styles.personalDataInput}
-                  placeholder="2000-12-31"
-                  placeholderTextColor="#9CA3AF"
-                />
+                <Text style={styles.personalDataFieldLabel}>dataNascimento (dd/MM/yyyy)</Text>
+                <Pressable
+                  onPress={() => setBirthDatePickerVisible(true)}
+                  style={({ pressed }) => [styles.personalDataDateInput, pressed && styles.personalDataDateInputPressed]}>
+                  <Text
+                    style={
+                      personalDataForm.dataNascimento
+                        ? styles.personalDataDateValue
+                        : styles.personalDataDatePlaceholder
+                    }>
+                    {personalDataForm.dataNascimento || 'dd/MM/yyyy'}
+                  </Text>
+                  <Ionicons name="calendar-outline" size={18} color="#6B7280" />
+                </Pressable>
+
+                {birthDatePickerVisible ? (
+                  <DateTimePicker
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    value={birthDatePickerValue}
+                    maximumDate={new Date()}
+                    onChange={handleBirthDateChange}
+                  />
+                ) : null}
               </View>
 
               <View style={styles.personalDataFieldBlock}>
@@ -1062,6 +1157,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#111827',
     backgroundColor: '#FFFFFF',
+  },
+  personalDataDateInput: {
+    height: 44,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  personalDataDateInputPressed: {
+    opacity: 0.85,
+  },
+  personalDataDateValue: {
+    fontSize: 14,
+    color: '#111827',
+  },
+  personalDataDatePlaceholder: {
+    fontSize: 14,
+    color: '#9CA3AF',
   },
   personalDataSaveButton: {
     marginTop: 8,
