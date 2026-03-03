@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { makeRedirectUri } from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
 import Constants from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
@@ -32,8 +33,25 @@ const GOOGLE_ANDROID_CLIENT_ID =
   process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? GOOGLE_CLIENT_ID;
 const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? GOOGLE_CLIENT_ID;
 const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? GOOGLE_CLIENT_ID;
+const GOOGLE_WEB_REDIRECT_URI = process.env.EXPO_PUBLIC_GOOGLE_WEB_REDIRECT_URI;
 const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient';
 const IS_WEB = Platform.OS === 'web';
+
+function normalizeWebRedirectUri(value: string) {
+  const trimmed = value.trim();
+
+  try {
+    const parsed = new URL(trimmed);
+
+    if (!parsed.pathname || parsed.pathname === '') {
+      parsed.pathname = '/';
+    }
+
+    return parsed.toString();
+  } catch {
+    return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
+  }
+}
 
 const GOOGLE_ANDROID_CLIENT_ID_EFFECTIVE = IS_EXPO_GO
   ? GOOGLE_WEB_CLIENT_ID ?? GOOGLE_CLIENT_ID
@@ -48,12 +66,57 @@ export default function IndexScreen() {
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authFeedback, setAuthFeedback] = useState<string | null>(null);
 
+  const currentWebOrigin = useMemo(() => {
+    if (!IS_WEB || typeof window === 'undefined') {
+      return null;
+    }
+
+    return window.location.origin;
+  }, []);
+
+  const googleRedirectUri = useMemo(
+    () => {
+      if (IS_WEB && GOOGLE_WEB_REDIRECT_URI?.trim()) {
+        return normalizeWebRedirectUri(GOOGLE_WEB_REDIRECT_URI);
+      }
+
+      if (IS_WEB && currentWebOrigin) {
+        return normalizeWebRedirectUri(currentWebOrigin);
+      }
+
+      return makeRedirectUri({
+        scheme: 'lseeapp',
+        preferLocalhost: true,
+      });
+    },
+    [currentWebOrigin]
+  );
+
+  const isWebOriginDifferentFromRedirect =
+    IS_WEB &&
+    currentWebOrigin &&
+    GOOGLE_WEB_REDIRECT_URI?.trim() &&
+    normalizeWebRedirectUri(currentWebOrigin) !== normalizeWebRedirectUri(GOOGLE_WEB_REDIRECT_URI);
+
   const [request, , promptAsync] = Google.useIdTokenAuthRequest({
-    clientId: GOOGLE_CLIENT_ID,
     androidClientId: GOOGLE_ANDROID_CLIENT_ID_EFFECTIVE ?? 'MISSING_ANDROID_CLIENT_ID',
     iosClientId: GOOGLE_IOS_CLIENT_ID ?? 'MISSING_IOS_CLIENT_ID',
     webClientId: GOOGLE_WEB_CLIENT_ID ?? 'MISSING_WEB_CLIENT_ID',
+    redirectUri: googleRedirectUri,
   });
+
+  const googleRequestRedirectUri = useMemo(() => {
+    if (!request?.url) {
+      return null;
+    }
+
+    try {
+      const parsed = new URL(request.url);
+      return parsed.searchParams.get('redirect_uri');
+    } catch {
+      return null;
+    }
+  }, [request?.url]);
 
   const authBaseUrl = useMemo(() => getAuthBaseUrl(), []);
 
@@ -71,12 +134,26 @@ export default function IndexScreen() {
 
     if (result.type !== 'success') {
       const providerError = result.params?.error ?? result.error?.message ?? null;
-      const feedback = providerError
-        ? `Login Google não concluído (${result.type}): ${providerError}`
-        : `Login Google não concluído (${result.type}).`;
+      const providerErrorDescription = result.params?.error_description ?? null;
+      const isPermissionBlocked =
+        providerError === 'access_denied' ||
+        providerError === 'access_blocked' ||
+        providerError === 'origin_mismatch' ||
+        providerError === 'redirect_uri_mismatch';
 
-      setAuthFeedback(feedback);
-      Alert.alert('Login não concluído', feedback);
+      const feedback = isPermissionBlocked
+        ? 'Google bloqueou a permissão. Verifique OAuth consent screen (app em Testing + usuário em Test users), Authorized JavaScript origins e Authorized redirect URIs do client Web.'
+        : providerError
+          ? `Login Google não concluído (${result.type}): ${providerError}`
+          : `Login Google não concluído (${result.type}).`;
+
+      const feedbackWithDescription =
+        providerErrorDescription && !isPermissionBlocked
+          ? `${feedback} ${providerErrorDescription}`
+          : feedback;
+
+      setAuthFeedback(feedbackWithDescription);
+      Alert.alert('Login não concluído', feedbackWithDescription);
       return;
     }
 
@@ -178,8 +255,36 @@ export default function IndexScreen() {
 
         {IS_WEB ? (
           <Text style={styles.baseUrlText}>
-            Web OAuth: configure no Google Cloud o origin e redirect URI para o endereço atual
-            (ex.: http://localhost:19027).
+            Web OAuth redirectUri em uso: {googleRedirectUri}
+          </Text>
+        ) : null}
+
+        {IS_WEB && googleRequestRedirectUri ? (
+          <Text style={styles.baseUrlText}>
+            redirect_uri enviado ao Google: {googleRequestRedirectUri}
+          </Text>
+        ) : null}
+
+        {IS_WEB && currentWebOrigin ? (
+          <Text style={styles.baseUrlText}>Origem Web atual: {currentWebOrigin}</Text>
+        ) : null}
+
+        {isWebOriginDifferentFromRedirect ? (
+          <Text style={styles.warningText}>
+            A origem atual do navegador está diferente do redirect URI configurado no .env. Use a mesma porta nos dois lados.
+          </Text>
+        ) : null}
+
+        {IS_WEB && !GOOGLE_WEB_REDIRECT_URI?.trim() ? (
+          <Text style={styles.baseUrlText}>
+            Dica: defina EXPO_PUBLIC_GOOGLE_WEB_REDIRECT_URI no .env para fixar o redirect URI no Google Cloud.
+          </Text>
+        ) : null}
+
+        {IS_WEB ? (
+          <Text style={styles.baseUrlText}>
+            No Google Cloud (OAuth Client Web), adicione também o origin atual
+            (ex.: http://localhost:8088) em Authorized JavaScript origins.
           </Text>
         ) : null}
 

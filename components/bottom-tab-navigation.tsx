@@ -112,17 +112,41 @@ function formatDateToDisplay(value: string) {
 }
 
 function formatDateToApi(value: string) {
-  const [day, month, year] = value.split('/');
+  const trimmed = value.trim();
 
-  if (!day || !month || !year) {
+  if (!trimmed) {
     return null;
   }
 
-  if (day.length !== 2 || month.length !== 2 || year.length !== 4) {
-    return null;
+  if (trimmed.includes('/')) {
+    const [day, month, year] = trimmed.split('/');
+
+    if (!day || !month || !year) {
+      return null;
+    }
+
+    if (day.length !== 2 || month.length !== 2 || year.length !== 4) {
+      return null;
+    }
+
+    return `${year}-${month}-${day}`;
   }
 
-  return `${year}-${month}-${day}`;
+  if (trimmed.includes('-')) {
+    const [year, month, day] = trimmed.split('-');
+
+    if (!day || !month || !year) {
+      return null;
+    }
+
+    if (day.length !== 2 || month.length !== 2 || year.length !== 4) {
+      return null;
+    }
+
+    return `${year}-${month}-${day}`;
+  }
+
+  return null;
 }
 
 function parseDisplayDate(value: string) {
@@ -142,6 +166,88 @@ function formatDateFromPicker(date: Date) {
   const year = String(date.getFullYear());
 
   return `${day}/${month}/${year}`;
+}
+
+function formatDateInputMask(value: string) {
+  const trimmed = value.trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return formatDateToDisplay(trimmed);
+  }
+
+  const digitsOnly = value.replace(/\D/g, '').slice(0, 8);
+
+  if (digitsOnly.length <= 2) {
+    return digitsOnly;
+  }
+
+  if (digitsOnly.length <= 4) {
+    return `${digitsOnly.slice(0, 2)}/${digitsOnly.slice(2)}`;
+  }
+
+  return `${digitsOnly.slice(0, 2)}/${digitsOnly.slice(2, 4)}/${digitsOnly.slice(4)}`;
+}
+
+function formatPhoneInputMask(value: string) {
+  const digitsOnly = value.replace(/\D/g, '').slice(0, 11);
+
+  if (digitsOnly.length <= 2) {
+    return digitsOnly;
+  }
+
+  if (digitsOnly.length <= 6) {
+    return `(${digitsOnly.slice(0, 2)}) ${digitsOnly.slice(2)}`;
+  }
+
+  if (digitsOnly.length <= 10) {
+    return `(${digitsOnly.slice(0, 2)}) ${digitsOnly.slice(2, 6)}-${digitsOnly.slice(6)}`;
+  }
+
+  return `(${digitsOnly.slice(0, 2)}) ${digitsOnly.slice(2, 7)}-${digitsOnly.slice(7)}`;
+}
+
+function toDigitsOnly(value: string) {
+  return value.replace(/\D/g, '');
+}
+
+function normalizeDecimalInput(value: string) {
+  const normalized = value.trim().replace(',', '.');
+
+  if (!normalized) {
+    return '';
+  }
+
+  const parsed = Number(normalized);
+
+  if (Number.isNaN(parsed)) {
+    return normalized;
+  }
+
+  return String(parsed);
+}
+
+function normalizeLookupText(value: string | null | undefined) {
+  return (value ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+function isEmailContactType(option: LookupOption | null) {
+  const combined = normalizeLookupText(`${option?.codigo ?? ''} ${option?.descricao ?? ''}`);
+  return combined.includes('email') || combined.includes('e-mail') || combined.includes('mail');
+}
+
+function isPhoneContactType(option: LookupOption | null) {
+  const combined = normalizeLookupText(`${option?.codigo ?? ''} ${option?.descricao ?? ''}`);
+  return (
+    combined.includes('telefone') ||
+    combined.includes('celular') ||
+    combined.includes('whatsapp') ||
+    combined.includes('what s app') ||
+    combined.includes('phone')
+  );
 }
 
 function HomeScreen() {
@@ -248,6 +354,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   const [isLoadingLookupOptions, setIsLoadingLookupOptions] = useState(false);
   const [isSavingPersonalData, setIsSavingPersonalData] = useState(false);
   const [personalDataFeedback, setPersonalDataFeedback] = useState<string | null>(null);
+  const [tipoContatoLookupFeedback, setTipoContatoLookupFeedback] = useState<string | null>(null);
   const coverPhotoStorageKey = `lsee.cover_photo.${profile.usuarioId}`;
   const stravaReturnTo = useMemo(() => ExpoLinking.createURL('/'), []);
 
@@ -257,7 +364,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
 
       if (!response.ok) {
         setStravaStatus('disconnected');
-        setStravaFeedback('Não foi possível consultar status do Strava.');
+        setStravaFeedback('Não foi possível consultar o status do Strava.');
         return;
       }
 
@@ -265,7 +372,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
       setStravaStatus(payload.authenticated ? 'connected' : 'disconnected');
     } catch {
       setStravaStatus('disconnected');
-      setStravaFeedback('Erro ao consultar status do Strava.');
+      setStravaFeedback('Erro ao consultar o status do Strava.');
     }
   }, [stravaReturnTo]);
 
@@ -283,7 +390,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
 
     if (stravaState === 'error') {
       const reason = params.get('reason');
-      setStravaFeedback(reason ? `Falha ao conectar com Strava (${reason}).` : 'Falha ao conectar com Strava.');
+      setStravaFeedback(reason ? `Falha ao conectar ao Strava (${reason}).` : 'Falha ao conectar ao Strava.');
       setStravaStatus('disconnected');
       return;
     }
@@ -354,20 +461,25 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
       setStravaFeedback(null);
 
       if (stravaStatus === 'connected') {
-        const shouldLogout = await new Promise<boolean>((resolve) => {
-          Alert.alert('Desconectar Strava', 'Tem certeza?', [
-            {
-              text: 'Cancelar',
-              style: 'cancel',
-              onPress: () => resolve(false),
-            },
-            {
-              text: 'Desconectar',
-              style: 'destructive',
-              onPress: () => resolve(true),
-            },
-          ]);
-        });
+        const shouldLogout =
+          Platform.OS === 'web'
+            ? typeof globalThis.confirm === 'function'
+              ? globalThis.confirm('Tem certeza que deseja desconectar do Strava?')
+              : false
+            : await new Promise<boolean>((resolve) => {
+                Alert.alert('Desconectar Strava', 'Tem certeza?', [
+                  {
+                    text: 'Cancelar',
+                    style: 'cancel',
+                    onPress: () => resolve(false),
+                  },
+                  {
+                    text: 'Desconectar',
+                    style: 'destructive',
+                    onPress: () => resolve(true),
+                  },
+                ]);
+              });
 
         if (!shouldLogout) {
           return;
@@ -391,7 +503,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
 
       await Linking.openURL(authUrl);
     } catch {
-      setStravaFeedback('Não foi possível abrir o login do Strava.');
+      setStravaFeedback('Não foi possível abrir a autenticação do Strava.');
     }
   }
 
@@ -437,14 +549,32 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   }
 
   const loadPersonalData = useCallback(async () => {
+    async function fetchPersonalData() {
+      const routes = ['/dados-pessoais', '/dadosPessoais'];
+
+      for (const route of routes) {
+        const response = await apiFetchAuth(route);
+
+        if (response.ok) {
+          return response;
+        }
+
+        if (response.status !== 404) {
+          return response;
+        }
+      }
+
+      return apiFetchAuth('/dados-pessoais');
+    }
+
     try {
       setIsLoadingPersonalData(true);
       setPersonalDataFeedback(null);
 
-      const response = await apiFetchAuth('/dados-pessoais');
+      const response = await fetchPersonalData();
 
       if (!response.ok) {
-        setPersonalDataFeedback('Não foi possível carregar Dados Pessoais.');
+        setPersonalDataFeedback('Não foi possível carregar os dados pessoais.');
         return;
       }
 
@@ -465,7 +595,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
       setPersonalDataForm(mapped);
       setBirthDatePickerValue(parseDisplayDate(mapped.dataNascimento) ?? new Date(2000, 0, 1));
     } catch {
-      setPersonalDataFeedback('Erro ao carregar Dados Pessoais.');
+      setPersonalDataFeedback('Erro ao carregar os dados pessoais.');
     } finally {
       setIsLoadingPersonalData(false);
     }
@@ -477,7 +607,8 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
         const response = await apiFetchAuth(route);
 
         if (!response.ok) {
-          return [] as LookupOption[];
+          console.warn(`[MinhaConta] Não foi possível carregar lookup em ${route} (status ${response.status}).`);
+          return { options: [] as LookupOption[], failed: true };
         }
 
         const payload = (await response.json()) as unknown;
@@ -485,39 +616,104 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
           ? payload
           : payload && typeof payload === 'object' && Array.isArray((payload as any).items)
             ? (payload as any).items
+            : payload && typeof payload === 'object' && Array.isArray((payload as any).data)
+              ? (payload as any).data
+              : payload && typeof payload === 'object' && Array.isArray((payload as any).results)
+                ? (payload as any).results
             : [];
 
-        return list
+        const options = list
           .filter((item) => item && typeof item === 'object')
           .map((item) => {
             const raw = item as Record<string, unknown>;
+            const idValue = raw.id ?? raw.uuid ?? raw.value;
+            const codigoValue = raw.codigo ?? raw.code ?? raw.sigla ?? raw.tipoContato;
+            const descricaoValue = raw.descricao ?? raw.nome ?? raw.label ?? raw.tipoContato ?? raw.codigo;
+
             return {
-              id: String(raw.id ?? ''),
-              codigo: String(raw.codigo ?? ''),
-              descricao: String(raw.descricao ?? ''),
+              id: String(idValue ?? ''),
+              codigo: String(codigoValue ?? ''),
+              descricao: String(descricaoValue ?? ''),
             } as LookupOption;
           })
           .filter((item) => item.id);
+
+        return { options, failed: false };
       } catch {
-        return [] as LookupOption[];
+        return { options: [] as LookupOption[], failed: true };
       }
+    }
+
+    async function loadFromRoutes(routes: string[]) {
+      let hadFailure = false;
+
+      for (const route of routes) {
+        const result = await loadFromRoute(route);
+
+        if (result.failed) {
+          hadFailure = true;
+        }
+
+        if (result.options.length > 0) {
+          return { options: result.options, hadFailure: false };
+        }
+      }
+
+      return { options: [] as LookupOption[], hadFailure };
     }
 
     try {
       setIsLoadingLookupOptions(true);
-      const [generos, tiposContato] = await Promise.all([
+      setTipoContatoLookupFeedback(null);
+
+      const [generoResult, tiposContatoResult] = await Promise.all([
         loadFromRoute('/genero'),
-        loadFromRoute('/tipo-contato'),
+        loadFromRoutes(['/tipoContato', '/tipo-contato']),
       ]);
 
-      setGeneroOptions(generos);
-      setTipoContatoOptions(tiposContato);
+      setGeneroOptions(generoResult.options);
+      setTipoContatoOptions(tiposContatoResult.options);
+
+      if (tiposContatoResult.options.length === 0 && tiposContatoResult.hadFailure) {
+        setTipoContatoLookupFeedback('Não foi possível carregar os tipos de contato no momento.');
+      }
     } finally {
       setIsLoadingLookupOptions(false);
     }
   }, []);
 
   async function handleSavePersonalData() {
+    async function savePersonalDataWithFallback(payload: Record<string, unknown>) {
+      const routeSets = personalDataId
+        ? [
+            `/dados-pessoais/${personalDataId}`,
+            `/dadosPessoais/${personalDataId}`,
+          ]
+        : ['/dados-pessoais', '/dadosPessoais'];
+
+      const method = personalDataId ? 'PUT' : 'POST';
+
+      for (const route of routeSets) {
+        const response = await apiFetchAuth(route, {
+          method,
+          body: JSON.stringify(payload),
+        });
+
+        if (response.ok) {
+          return response;
+        }
+
+        if (response.status !== 404) {
+          return response;
+        }
+      }
+
+      return apiFetchAuth(routeSets[0], {
+        method,
+        body: JSON.stringify(payload),
+      });
+    }
+
     try {
       setIsSavingPersonalData(true);
       setPersonalDataFeedback(null);
@@ -529,7 +725,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
         !personalDataForm.altura.trim() ||
         !personalDataForm.peso.trim()
       ) {
-        setPersonalDataFeedback('Preencha apelido, dataNascimento, idGenero, altura e peso.');
+        setPersonalDataFeedback('Preencha apelido, data de nascimento, gênero, altura e peso.');
         return;
       }
 
@@ -540,59 +736,94 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
         return;
       }
 
+      const normalizedAltura = normalizeDecimalInput(personalDataForm.altura);
+      const normalizedPeso = normalizeDecimalInput(personalDataForm.peso);
+      const alturaNumber = Number(normalizedAltura);
+      const pesoNumber = Number(normalizedPeso);
+
+      if (Number.isNaN(alturaNumber) || alturaNumber < 0.5 || alturaNumber > 2.5) {
+        setPersonalDataFeedback('Altura inválida. Informe um valor entre 0,50 e 2,50 metros.');
+        return;
+      }
+
+      if (Number.isNaN(pesoNumber) || pesoNumber < 20 || pesoNumber > 400) {
+        setPersonalDataFeedback('Peso inválido. Informe um valor entre 20 e 400 kg.');
+        return;
+      }
+
       const hasAnyContato =
         personalDataForm.idTipoContato.trim() ||
         personalDataForm.contatoNome.trim() ||
         personalDataForm.contatoEmail.trim() ||
         personalDataForm.contatoTelefone.trim();
 
-      if (
-        hasAnyContato &&
-        (!personalDataForm.idTipoContato.trim() ||
-          !personalDataForm.contatoNome.trim() ||
-          !personalDataForm.contatoEmail.trim() ||
-          !personalDataForm.contatoTelefone.trim())
-      ) {
-        setPersonalDataFeedback('Para salvar contato, preencha idTipoContato, nome, email e telefone.');
+      if (hasAnyContato && !personalDataForm.idTipoContato.trim()) {
+        setPersonalDataFeedback('Para salvar o contato, selecione o tipo de contato.');
         return;
+      }
+
+      if (hasAnyContato) {
+        const selectedTipoContato = tipoContatoOptions.find(
+          (item) => item.id === personalDataForm.idTipoContato.trim()
+        ) ?? null;
+
+        if (isEmailContactType(selectedTipoContato) && !personalDataForm.contatoEmail.trim()) {
+          setPersonalDataFeedback('Para tipo de contato E-mail, preencha o e-mail.');
+          return;
+        }
+
+        if (isPhoneContactType(selectedTipoContato) && !personalDataForm.contatoTelefone.trim()) {
+          setPersonalDataFeedback('Para tipo de contato Telefone/WhatsApp, preencha o telefone.');
+          return;
+        }
       }
 
       const payload: Record<string, unknown> = {
         apelido: personalDataForm.apelido.trim(),
-        dataNascimento: normalizedBirthDate,
+        dataNascimento: `${normalizedBirthDate}T00:00:00.000Z`,
         idGenero: personalDataForm.idGenero.trim(),
-        altura: personalDataForm.altura.trim(),
-        peso: personalDataForm.peso.trim(),
+        altura: alturaNumber,
+        peso: pesoNumber,
       };
 
       if (hasAnyContato) {
-        payload.listaContato = [
-          {
-            idTipoContato: personalDataForm.idTipoContato.trim(),
-            nome: personalDataForm.contatoNome.trim(),
-            email: personalDataForm.contatoEmail.trim(),
-            telefone: personalDataForm.contatoTelefone.trim(),
-          },
-        ];
+        const contatoPayload: Record<string, string> = {
+          idTipoContato: personalDataForm.idTipoContato.trim(),
+          nome: personalDataForm.contatoNome.trim() || '',
+          email: personalDataForm.contatoEmail.trim() || '',
+          telefone: toDigitsOnly(personalDataForm.contatoTelefone) || '',
+        };
+
+        payload.listaContato = [contatoPayload];
       }
 
-      const response = personalDataId
-        ? await apiFetchAuth(`/dados-pessoais/${personalDataId}`, {
-            method: 'PUT',
-            body: JSON.stringify(payload),
-          })
-        : await apiFetchAuth('/dados-pessoais', {
-            method: 'POST',
-            body: JSON.stringify(payload),
-          });
+      const response = await savePersonalDataWithFallback(payload);
 
       if (!response.ok) {
-        const errorPayload = await response.json().catch(() => null);
+        const errorText = await response.text().catch(() => '');
+        const errorPayload = (() => {
+          if (!errorText) {
+            return null;
+          }
+
+          try {
+            return JSON.parse(errorText) as any;
+          } catch {
+            return null;
+          }
+        })();
+
         const message =
           typeof errorPayload?.error === 'string'
             ? errorPayload.error
-            : 'Não foi possível salvar Dados Pessoais.';
-        setPersonalDataFeedback(message);
+            : typeof errorPayload?.message === 'string'
+              ? errorPayload.message
+              : Array.isArray(errorPayload?.message)
+                ? String(errorPayload.message[0] ?? '') || 'Não foi possível salvar os dados pessoais.'
+                : typeof errorPayload?.details === 'string'
+                  ? errorPayload.details
+                  : errorText || 'Não foi possível salvar os dados pessoais.';
+        setPersonalDataFeedback(message || `Não foi possível salvar os dados pessoais (status ${response.status}).`);
         return;
       }
 
@@ -606,9 +837,9 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
       const mapped = mapDadosPessoaisToForm(saved);
       setPersonalDataForm(mapped);
       setBirthDatePickerValue(parseDisplayDate(mapped.dataNascimento) ?? new Date(2000, 0, 1));
-      setPersonalDataFeedback('Dados Pessoais salvos com sucesso.');
+      setPersonalDataFeedback('Dados pessoais salvos com sucesso.');
     } catch {
-      setPersonalDataFeedback('Erro ao salvar Dados Pessoais.');
+      setPersonalDataFeedback('Erro ao salvar os dados pessoais.');
     } finally {
       setIsSavingPersonalData(false);
     }
@@ -621,7 +852,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   }
 
   function handleBirthDateChange(event: DateTimePickerEvent, selectedDate?: Date) {
-    if (Platform.OS === 'android') {
+    if (Platform.OS === 'android' || Platform.OS === 'web') {
       setBirthDatePickerVisible(false);
     }
 
@@ -635,6 +866,11 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
       dataNascimento: formatDateFromPicker(selectedDate),
     }));
   }
+
+  const selectedTipoContatoForUi =
+    tipoContatoOptions.find((item) => item.id === personalDataForm.idTipoContato.trim()) ?? null;
+  const isContatoEmailRequired = isEmailContactType(selectedTipoContatoForUi);
+  const isContatoTelefoneRequired = isPhoneContactType(selectedTipoContatoForUi);
 
   return (
     <ScrollView style={styles.profileScreen} contentContainerStyle={styles.profileContent}>
@@ -725,7 +961,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
           ) : (
             <View style={styles.personalDataFormContainer}>
               <View style={styles.personalDataFieldBlock}>
-                <Text style={styles.personalDataFieldLabel}>apelido</Text>
+                <Text style={styles.personalDataFieldLabel}>Apelido</Text>
                 <TextInput
                   value={personalDataForm.apelido}
                   onChangeText={(text) => setPersonalDataForm((prev) => ({ ...prev, apelido: text }))}
@@ -736,17 +972,33 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
               </View>
 
               <View style={styles.personalDataFieldBlock}>
-                <Text style={styles.personalDataFieldLabel}>dataNascimento (dd/MM/yyyy)</Text>
+                <Text style={styles.personalDataFieldLabel}>Data de nascimento (dd/MM/yyyy)</Text>
                 {Platform.OS === 'web' ? (
                   <View style={styles.webDatePickerBlock}>
-                    <DateTimePicker
-                      mode="date"
-                      display="default"
-                      value={birthDatePickerValue}
-                      maximumDate={new Date()}
-                      onChange={handleBirthDateChange}
+                    <TextInput
+                      value={personalDataForm.dataNascimento}
+                      onChangeText={(text) =>
+                        setPersonalDataForm((prev) => ({
+                          ...prev,
+                          dataNascimento: formatDateInputMask(text),
+                        }))
+                      }
+                      onBlur={() => {
+                        const parsedDate = parseDisplayDate(personalDataForm.dataNascimento.trim());
+
+                        if (parsedDate) {
+                          setBirthDatePickerValue(parsedDate);
+                          setPersonalDataForm((prev) => ({
+                            ...prev,
+                            dataNascimento: formatDateFromPicker(parsedDate),
+                          }));
+                        }
+                      }}
+                      style={styles.personalDataInput}
+                      placeholder="dd/MM/yyyy"
+                      placeholderTextColor="#9CA3AF"
                     />
-                    <Text style={styles.personalDataDateValue}>{personalDataForm.dataNascimento || 'dd/MM/yyyy'}</Text>
+                    <Text style={styles.personalDataInfoText}>No web, informe manualmente no formato dd/MM/yyyy.</Text>
                   </View>
                 ) : (
                   <>
@@ -778,33 +1030,30 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
               </View>
 
               <View style={styles.personalDataFieldBlock}>
-                <Text style={styles.personalDataFieldLabel}>idGenero</Text>
-                {isLoadingLookupOptions ? (
-                  <Text style={styles.personalDataInfoText}>Carregando opções de gênero...</Text>
-                ) : generoOptions.length > 0 ? (
-                  <View style={styles.pickerContainer}>
-                    <Picker
-                      selectedValue={personalDataForm.idGenero}
-                      onValueChange={(value) => setPersonalDataForm((prev) => ({ ...prev, idGenero: String(value ?? '') }))}>
-                      <Picker.Item label="Selecione" value="" />
-                      {generoOptions.map((item) => (
-                        <Picker.Item key={item.id} label={item.descricao || item.codigo} value={item.id} />
-                      ))}
-                    </Picker>
-                  </View>
-                ) : (
-                  <TextInput
-                    value={personalDataForm.idGenero}
-                    onChangeText={(text) => setPersonalDataForm((prev) => ({ ...prev, idGenero: text }))}
-                    style={styles.personalDataInput}
-                    placeholder="UUID do gênero"
-                    placeholderTextColor="#9CA3AF"
-                  />
-                )}
+                <Text style={styles.personalDataFieldLabel}>Gênero</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker
+                    enabled={!isLoadingLookupOptions && generoOptions.length > 0}
+                    selectedValue={personalDataForm.idGenero}
+                    onValueChange={(value) => setPersonalDataForm((prev) => ({ ...prev, idGenero: String(value ?? '') }))}>
+                    {isLoadingLookupOptions ? (
+                      <Picker.Item label="Carregando opções de gênero..." value="" />
+                    ) : generoOptions.length > 0 ? (
+                      <>
+                        <Picker.Item label="Selecione" value="" />
+                        {generoOptions.map((item) => (
+                          <Picker.Item key={item.id} label={item.descricao || item.codigo} value={item.id} />
+                        ))}
+                      </>
+                    ) : (
+                      <Picker.Item label="Nenhuma opção de gênero disponível" value="" />
+                    )}
+                  </Picker>
+                </View>
               </View>
 
               <View style={styles.personalDataFieldBlock}>
-                <Text style={styles.personalDataFieldLabel}>altura</Text>
+                <Text style={styles.personalDataFieldLabel}>Altura</Text>
                 <TextInput
                   value={personalDataForm.altura}
                   onChangeText={(text) => setPersonalDataForm((prev) => ({ ...prev, altura: text }))}
@@ -813,10 +1062,11 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
                   placeholderTextColor="#9CA3AF"
                   keyboardType="decimal-pad"
                 />
+                <Text style={styles.personalDataInfoText}>Faixa permitida: 0,50 a 2,50 m.</Text>
               </View>
 
               <View style={styles.personalDataFieldBlock}>
-                <Text style={styles.personalDataFieldLabel}>peso</Text>
+                <Text style={styles.personalDataFieldLabel}>Peso</Text>
                 <TextInput
                   value={personalDataForm.peso}
                   onChangeText={(text) => setPersonalDataForm((prev) => ({ ...prev, peso: text }))}
@@ -825,38 +1075,60 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
                   placeholderTextColor="#9CA3AF"
                   keyboardType="decimal-pad"
                 />
+                <Text style={styles.personalDataInfoText}>Faixa permitida: 20 a 400 kg.</Text>
               </View>
 
               <Text style={styles.personalDataSectionTitle}>Contato (opcional)</Text>
 
               <View style={styles.personalDataFieldBlock}>
-                <Text style={styles.personalDataFieldLabel}>idTipoContato</Text>
-                {isLoadingLookupOptions ? (
-                  <Text style={styles.personalDataInfoText}>Carregando tipos de contato...</Text>
-                ) : tipoContatoOptions.length > 0 ? (
-                  <View style={styles.pickerContainer}>
-                    <Picker
-                      selectedValue={personalDataForm.idTipoContato}
-                      onValueChange={(value) => setPersonalDataForm((prev) => ({ ...prev, idTipoContato: String(value ?? '') }))}>
-                      <Picker.Item label="Selecione" value="" />
-                      {tipoContatoOptions.map((item) => (
-                        <Picker.Item key={item.id} label={item.descricao || item.codigo} value={item.id} />
-                      ))}
-                    </Picker>
-                  </View>
-                ) : (
-                  <TextInput
-                    value={personalDataForm.idTipoContato}
-                    onChangeText={(text) => setPersonalDataForm((prev) => ({ ...prev, idTipoContato: text }))}
-                    style={styles.personalDataInput}
-                    placeholder="UUID do tipo de contato"
-                    placeholderTextColor="#9CA3AF"
-                  />
-                )}
+                <Text style={styles.personalDataFieldLabel}>Tipo de contato</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker
+                    enabled={!isLoadingLookupOptions && tipoContatoOptions.length > 0}
+                    selectedValue={personalDataForm.idTipoContato}
+                    onValueChange={(value) => setPersonalDataForm((prev) => ({ ...prev, idTipoContato: String(value ?? '') }))}>
+                    {isLoadingLookupOptions ? (
+                      <Picker.Item label="Carregando tipos de contato..." value="" />
+                    ) : tipoContatoOptions.length > 0 ? (
+                      <>
+                        <Picker.Item label="Selecione" value="" />
+                        {tipoContatoOptions.map((item) => (
+                          <Picker.Item key={item.id} label={item.descricao || item.codigo} value={item.id} />
+                        ))}
+                      </>
+                    ) : (
+                      <Picker.Item label="Nenhum tipo de contato disponível" value="" />
+                    )}
+                  </Picker>
+                </View>
+
+                {tipoContatoLookupFeedback ? (
+                  <>
+                    <Text style={styles.personalDataInfoText}>{tipoContatoLookupFeedback}</Text>
+                    <Pressable
+                      onPress={() => {
+                        void loadLookupOptions();
+                      }}
+                      disabled={isLoadingLookupOptions}
+                      style={({ pressed }) => [
+                        styles.retryLookupButton,
+                        pressed && styles.retryLookupButtonPressed,
+                        isLoadingLookupOptions && styles.retryLookupButtonDisabled,
+                      ]}>
+                      <Text style={styles.retryLookupButtonText}>
+                        {isLoadingLookupOptions ? 'Tentando novamente...' : 'Tentar novamente'}
+                      </Text>
+                    </Pressable>
+                  </>
+                ) : null}
+
+                <Text style={styles.personalDataInfoText}>
+                  Tipo define qual campo é obrigatório.
+                </Text>
               </View>
 
               <View style={styles.personalDataFieldBlock}>
-                <Text style={styles.personalDataFieldLabel}>nome</Text>
+                <Text style={styles.personalDataFieldLabel}>Nome</Text>
                 <TextInput
                   value={personalDataForm.contatoNome}
                   onChangeText={(text) => setPersonalDataForm((prev) => ({ ...prev, contatoNome: text }))}
@@ -867,7 +1139,9 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
               </View>
 
               <View style={styles.personalDataFieldBlock}>
-                <Text style={styles.personalDataFieldLabel}>email</Text>
+                <Text style={styles.personalDataFieldLabel}>
+                  {isContatoEmailRequired ? 'Email * (obrigatório)' : 'Email'}
+                </Text>
                 <TextInput
                   value={personalDataForm.contatoEmail}
                   onChangeText={(text) => setPersonalDataForm((prev) => ({ ...prev, contatoEmail: text }))}
@@ -880,10 +1154,17 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
               </View>
 
               <View style={styles.personalDataFieldBlock}>
-                <Text style={styles.personalDataFieldLabel}>telefone</Text>
+                <Text style={styles.personalDataFieldLabel}>
+                  {isContatoTelefoneRequired ? 'Telefone * (obrigatório)' : 'Telefone'}
+                </Text>
                 <TextInput
                   value={personalDataForm.contatoTelefone}
-                  onChangeText={(text) => setPersonalDataForm((prev) => ({ ...prev, contatoTelefone: text }))}
+                  onChangeText={(text) =>
+                    setPersonalDataForm((prev) => ({
+                      ...prev,
+                      contatoTelefone: formatPhoneInputMask(text),
+                    }))
+                  }
                   style={styles.personalDataInput}
                   placeholder="(00) 00000-0000"
                   placeholderTextColor="#9CA3AF"
@@ -1181,6 +1462,27 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+  retryLookupButton: {
+    marginTop: 8,
+    height: 36,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryLookupButtonPressed: {
+    opacity: 0.85,
+  },
+  retryLookupButtonDisabled: {
+    opacity: 0.7,
+  },
+  retryLookupButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111827',
   },
   coverPhotoContainer: {
     width: '100%',
