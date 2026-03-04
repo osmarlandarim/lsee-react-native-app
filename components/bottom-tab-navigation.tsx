@@ -539,6 +539,26 @@ function BuscaScreen() {
   );
 }
 
+
+function formatBikeTime(val: string | number | null | undefined): string {
+  if (val == null || val === '-' || val === '') return '-';
+  let totalMinutes: number | null = null;
+  if (typeof val === 'number') {
+    totalMinutes = val;
+  } else if (/^\d+$/.test(val)) {
+    totalMinutes = parseInt(val, 10);
+  } else if (/^(\d+)[h:](\d+)[m]?$/.test(val)) {
+    // Already formatted as 327h46m or 327:46
+    return val.replace(':', 'h') + (val.includes('m') ? '' : 'm');
+  } else {
+    return val;
+  }
+  if (totalMinutes == null || isNaN(totalMinutes)) return String(val);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h}h${m.toString().padStart(2, '0')}m`;
+}
+
 function DetalheBikeScreen({ bike, onBack }: { bike: BikeItem; onBack: () => void }) {
   const [resumo, setResumo] = useState<BikeResumo | null>(null);
   const [status, setStatus] = useState('Carregando resumo...');
@@ -643,11 +663,10 @@ function DetalheBikeScreen({ bike, onBack }: { bike: BikeItem; onBack: () => voi
         <Pressable onPress={onBack} style={({ pressed }) => [styles.bikeDetailBackButton, pressed && styles.bikeDetailBackButtonPressed]}>
           <Ionicons name="arrow-back" size={22} color="#111827" />
         </Pressable>
-        <Text style={styles.bikeDetailHeaderTitle}>Detalhe Bike</Text>
+        <Text style={styles.bikeDetailHeaderTitle}>{bike.apelido?.trim() || 'Bike sem apelido'}</Text>
       </View>
 
-      <Text style={styles.bikeDetailBikeName}>{bike.apelido?.trim() || 'Bike sem apelido'}</Text>
-      <Text style={styles.bikesStatusText}>{status}</Text>
+      {status !== 'Resumo carregado' ? <Text style={styles.bikesStatusText}>{status}</Text> : null}
 
       {resumo ? (
         <View style={styles.resumoCard}>
@@ -659,7 +678,7 @@ function DetalheBikeScreen({ bike, onBack }: { bike: BikeItem; onBack: () => voi
             </View>
             <View style={styles.resumoMetricItem}>
               <Text style={styles.resumoLabel}>Tempo</Text>
-              <Text style={styles.resumoValue}>{resumo.tempoTotal}</Text>
+              <Text style={styles.resumoValue}>{formatBikeTime(resumo.tempoTotal)}</Text>
             </View>
             <View style={styles.resumoMetricItem}>
               <Text style={styles.resumoLabel}>Altimetria</Text>
@@ -675,7 +694,7 @@ function DetalheBikeScreen({ bike, onBack }: { bike: BikeItem; onBack: () => voi
             </View>
             <View style={styles.resumoMetricItem}>
               <Text style={styles.resumoLabel}>Tempo</Text>
-              <Text style={styles.resumoValue}>{resumo.tempoMes}</Text>
+              <Text style={styles.resumoValue}>{formatBikeTime(resumo.tempoMes)}</Text>
             </View>
             <View style={styles.resumoMetricItem}>
               <Text style={styles.resumoLabel}>Altimetria</Text>
@@ -2189,15 +2208,11 @@ const styles = StyleSheet.create({
   },
   resumoMetricItem: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
-    minHeight: 64,
   },
   resumoLabel: {
     fontSize: 12,
