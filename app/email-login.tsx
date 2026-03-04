@@ -1,7 +1,9 @@
-import { Link, useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Stack, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import AuthButton from '@/components/ui/auth-button';
 import { useAuth } from '@/contexts/auth-context';
 import { forgotPassword, registerWithEmailPassword, resetPasswordWithCode, signInWithEmailPassword } from '@/services/auth';
 
@@ -40,6 +42,22 @@ export default function EmailLoginScreen() {
       router.replace('/');
     }
   }, [session, router]);
+
+  const handleBackPress = useCallback(() => {
+    if (mode === 'reset') {
+      setMode('forgot');
+      setAuthFeedback(null);
+      return;
+    }
+
+    if (mode === 'register' || mode === 'forgot') {
+      setMode('login');
+      setAuthFeedback(null);
+      return;
+    }
+
+    router.back();
+  }, [mode, router]);
 
   async function handleSubmit() {
     const normalizedEmail = email.trim();
@@ -191,6 +209,19 @@ export default function EmailLoginScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <Stack.Screen
+        options={{
+          title: '',
+          headerLeft: () => (
+            <Pressable
+              onPress={handleBackPress}
+              style={({ pressed }) => [styles.headerBackButton, pressed && styles.headerBackButtonPressed]}>
+              <Ionicons name="arrow-back" size={22} color="#111827" />
+            </Pressable>
+          ),
+        }}
+      />
+
       <View style={styles.content}>
         <Text style={styles.title}>{title}</Text>
 
@@ -285,28 +316,21 @@ export default function EmailLoginScreen() {
           />
         ) : null}
 
-        <Pressable
+        <AuthButton
           onPress={handleSubmit}
           disabled={isSubmitting}
-          style={({ pressed }) => [
-            styles.submitButton,
-            pressed && styles.submitButtonPressed,
-            isSubmitting && styles.submitButtonDisabled,
-          ]}>
-          {isSubmitting ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Text style={styles.submitButtonText}>
-              {mode === 'login'
-                ? 'Entrar'
-                : mode === 'register'
-                  ? 'Criar conta'
-                  : mode === 'forgot'
-                    ? 'Enviar recuperação'
-                    : 'Redefinir senha'}
-            </Text>
-          )}
-        </Pressable>
+          isLoading={isSubmitting}
+          variant="dark"
+          label={
+            mode === 'login'
+              ? 'Entrar'
+              : mode === 'register'
+                ? 'Criar conta'
+                : mode === 'forgot'
+                  ? 'Enviar recuperação'
+                  : 'Redefinir senha'
+          }
+        />
 
         {mode === 'login' ? (
           <Pressable
@@ -338,16 +362,6 @@ export default function EmailLoginScreen() {
           </Pressable>
         ) : null}
 
-        {mode !== 'login' ? (
-          <Pressable
-            onPress={() => {
-              setMode('login');
-              setAuthFeedback(null);
-            }}>
-            <Text style={styles.linkText}>Voltar para login</Text>
-          </Pressable>
-        ) : null}
-
         {authFeedback ? <Text style={styles.feedbackText}>{authFeedback}</Text> : null}
 
         {mode === 'login' ? (
@@ -356,9 +370,6 @@ export default function EmailLoginScreen() {
           </Text>
         ) : null}
 
-        <Link href="/" style={styles.backLink}>
-          Voltar
-        </Link>
       </View>
     </SafeAreaView>
   );
@@ -375,6 +386,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     gap: 12,
   },
+  headerBackButton: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -4,
+  },
+  headerBackButtonPressed: {
+    opacity: 0.7,
+  },
   title: {
     fontSize: 24,
     fontWeight: '700',
@@ -389,25 +410,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     color: '#111827',
     backgroundColor: '#FFFFFF',
-  },
-  submitButton: {
-    marginTop: 6,
-    height: 48,
-    borderRadius: 8,
-    backgroundColor: '#111827',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  submitButtonPressed: {
-    opacity: 0.9,
-  },
-  submitButtonDisabled: {
-    opacity: 0.7,
-  },
-  submitButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
   },
   linkText: {
     marginTop: 4,
@@ -424,10 +426,5 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: 12,
     color: '#6B7280',
-  },
-  backLink: {
-    marginTop: 4,
-    color: '#6B7280',
-    fontSize: 13,
   },
 });

@@ -1,15 +1,15 @@
+import { Ionicons } from '@expo/vector-icons';
 import { makeRedirectUri } from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
     Image,
     Platform,
-    Pressable,
     SafeAreaView,
     StyleSheet,
     Text,
@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 
 import BottomTabNavigation from '@/components/bottom-tab-navigation';
+import AuthButton from '@/components/ui/auth-button';
 import { useAuth } from '@/contexts/auth-context';
 import {
     signInWithGoogleMobile,
@@ -32,6 +33,23 @@ const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? GOO
 const GOOGLE_WEB_REDIRECT_URI = process.env.EXPO_PUBLIC_GOOGLE_WEB_REDIRECT_URI;
 const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient';
 const IS_WEB = Platform.OS === 'web';
+
+function decodeJwtPayload(token: string): Record<string, any> | null {
+  const parts = token.split('.');
+
+  if (parts.length < 2) {
+    return null;
+  }
+
+  try {
+    const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = payloadBase64 + '='.repeat((4 - (payloadBase64.length % 4)) % 4);
+    const decoded = atob(padded);
+    return JSON.parse(decoded) as Record<string, any>;
+  } catch {
+    return null;
+  }
+}
 
 function normalizeWebRedirectUri(value: string) {
   const trimmed = value.trim();
@@ -60,6 +78,8 @@ export default function IndexScreen() {
   const router = useRouter();
   const { session, isHydrating, setAuthenticatedSession, signOut } = useAuth();
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [googleAuthFeedback, setGoogleAuthFeedback] = useState<string | null>(null);
+  const handledGoogleResponseFingerprintRef = useRef<string | null>(null);
 
   const googleRedirectUri = useMemo(
     () => {
@@ -75,7 +95,7 @@ export default function IndexScreen() {
     []
   );
 
-  const [request, , promptAsync] = Google.useIdTokenAuthRequest({
+  const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
     androidClientId: GOOGLE_ANDROID_CLIENT_ID_EFFECTIVE ?? 'MISSING_ANDROID_CLIENT_ID',
     iosClientId: GOOGLE_IOS_CLIENT_ID ?? 'MISSING_IOS_CLIENT_ID',
     webClientId: GOOGLE_WEB_CLIENT_ID ?? 'MISSING_WEB_CLIENT_ID',
@@ -83,13 +103,19 @@ export default function IndexScreen() {
   });
 
   const completeLoginWithIdToken = useCallback(async (idToken: string) => {
-    const nextSession = await signInWithGoogleMobile(idToken);
+    const nextSession = await signInWithGoogleMobile({
+      idToken,
+      clientId: GOOGLE_CLIENT_ID_EFFECTIVE ?? undefined,
+      platform: IS_WEB ? 'web' : Platform.OS === 'ios' ? 'ios' : 'android',
+    });
     await setAuthenticatedSession(nextSession);
   }, [setAuthenticatedSession]);
 
   const processGoogleAuthResult = useCallback(async (result: any) => {
     if (!result) {
-      Alert.alert('Login não concluído', 'Login não retornou resposta do Google. Verifique bloqueio de pop-up no navegador.');
+      const message = 'Login não retornou resposta do Google. Verifique bloqueio de pop-up no navegador.';
+      setGoogleAuthFeedback(message);
+      Alert.alert('Login não concluído', message);
       return;
     }
 
@@ -113,6 +139,7 @@ export default function IndexScreen() {
           ? `${feedback} ${providerErrorDescription}`
           : feedback;
 
+      setGoogleAuthFeedback(feedbackWithDescription);
       Alert.alert('Login não concluído', feedbackWithDescription);
       return;
     }
@@ -120,29 +147,66 @@ export default function IndexScreen() {
     const idToken = result.params?.id_token ?? result.authentication?.idToken;
 
     if (!idToken) {
-      Alert.alert('Falha no login', 'Google autenticou, mas não retornou idToken para a API.');
+      const message = 'Google autenticou, mas não retornou idToken para a API.';
+      setGoogleAuthFeedback(message);
+      Alert.alert('Falha no login', message);
       return;
     }
 
     try {
+      setGoogleAuthFeedback(null);
       setIsAuthenticating(true);
       await completeLoginWithIdToken(idToken);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro inesperado de autenticação.';
+      const rawMessage = error instanceof Error ? error.message : 'Erro inesperado de autenticação.';
+      const shouldShowAudienceHelp = rawMessage.toLowerCase().includes('validar idtoken');
+      const tokenClaims = decodeJwtPayload(idToken);
+      const tokenAudience = tokenClaims?.aud ?? 'desconhecido';
+      const tokenIssuer = tokenClaims?.iss ?? 'desconhecido';
+      const audienceHint = shouldShowAudienceHelp
+        ? ` A API precisa aceitar o client_id desta plataforma (${GOOGLE_CLIENT_ID_EFFECTIVE ?? 'não configurado'}) como audience do token. Token atual: aud=${tokenAudience}, iss=${tokenIssuer}.`
+        : '';
+      const message = `${rawMessage}${audienceHint}`;
+      setGoogleAuthFeedback(message);
       Alert.alert('Falha no login', message);
     } finally {
       setIsAuthenticating(false);
     }
   }, [completeLoginWithIdToken]);
 
+  useEffect(() => {
+    if (!response) {
+      return;
+    }
+
+    const responseData = response as any;
+
+    const fingerprint = JSON.stringify({
+      type: responseData.type,
+      state: responseData.params?.state ?? null,
+      idToken: responseData.params?.id_token ?? responseData.authentication?.idToken ?? null,
+      accessToken: responseData.params?.access_token ?? responseData.authentication?.accessToken ?? null,
+      error: responseData.params?.error ?? responseData.error?.message ?? null,
+    });
+
+    if (handledGoogleResponseFingerprintRef.current === fingerprint) {
+      return;
+    }
+
+    handledGoogleResponseFingerprintRef.current = fingerprint;
+    void processGoogleAuthResult(response);
+  }, [processGoogleAuthResult, response]);
+
   const handleGoogleSignInPress = useCallback(async () => {
     try {
-      const result = await promptAsync();
-      await processGoogleAuthResult(result);
+      setGoogleAuthFeedback(null);
+      await promptAsync();
     } catch {
-      Alert.alert('Login não concluído', 'Não foi possível iniciar o login Google. Verifique bloqueio de pop-up e tente novamente.');
+      const message = 'Não foi possível iniciar o login Google. Verifique bloqueio de pop-up e tente novamente.';
+      setGoogleAuthFeedback(message);
+      Alert.alert('Login não concluído', message);
     }
-  }, [processGoogleAuthResult, promptAsync]);
+  }, [promptAsync]);
 
   async function handleSignOut() {
     await signOut();
@@ -166,30 +230,27 @@ export default function IndexScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <Pressable
+        <AuthButton
           disabled={!request || isAuthenticating || isGoogleConfigMissing}
           onPress={handleGoogleSignInPress}
-          style={({ pressed }) => [
-            styles.googleButton,
-            pressed && styles.googleButtonPressed,
-            (!request || isAuthenticating || isGoogleConfigMissing) && styles.googleButtonDisabled,
-          ]}>
-          <Image
-            source={{
-              uri: 'https://developers.google.com/identity/images/g-logo.png',
-            }}
-            style={styles.googleLogo}
-          />
-          <Text style={styles.googleButtonText}>
-            {isAuthenticating ? 'Entrando...' : 'Continuar com Google'}
-          </Text>
-        </Pressable>
+          leftIcon={(
+            <Image
+              source={{
+                uri: 'https://developers.google.com/identity/images/g-logo.png',
+              }}
+              style={styles.googleLogo}
+            />
+          )}
+          label={isAuthenticating ? 'Entrando...' : 'Continuar com Google'}
+        />
 
-        <Pressable
+        <AuthButton
           onPress={() => router.push('/email-login' as never)}
-          style={({ pressed }) => [styles.emailButton, pressed && styles.emailButtonPressed]}>
-          <Text style={styles.emailButtonText}>Entrar com email</Text>
-        </Pressable>
+          leftIcon={<Ionicons name="mail-outline" size={18} color="#1F2937" />}
+          label="Entrar com email"
+        />
+
+        {googleAuthFeedback ? <Text style={styles.googleFeedbackText}>{googleAuthFeedback}</Text> : null}
       </View>
     </SafeAreaView>
   );
@@ -207,50 +268,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     gap: 12,
   },
-  googleButton: {
-    width: '100%',
-    maxWidth: 320,
-    height: 52,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  googleButtonPressed: {
-    opacity: 0.8,
-  },
-  googleButtonDisabled: {
-    opacity: 0.6,
-  },
   googleLogo: {
     width: 18,
     height: 18,
-  },
-  googleButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-  },
-  emailButton: {
-    width: '100%',
-    maxWidth: 320,
-    height: 52,
-    borderRadius: 8,
-    backgroundColor: '#111827',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emailButtonPressed: {
-    opacity: 0.9,
-  },
-  emailButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
   },
   loadingContainer: {
     flex: 1,
@@ -262,5 +282,11 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 14,
     color: '#374151',
+  },
+  googleFeedbackText: {
+    marginTop: 4,
+    textAlign: 'center',
+    color: '#B91C1C',
+    fontSize: 13,
   },
 });

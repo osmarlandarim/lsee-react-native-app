@@ -24,7 +24,22 @@ function reportSecureStoreError(operation: string, error: unknown) {
 }
 
 function normalizeBaseUrl(baseUrl: string) {
-  return baseUrl.replace(/\/$/, '');
+  const trimmed = baseUrl.trim();
+
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  let normalized = trimmed
+    .replace(/^htt:\/\//i, 'http://')
+    .replace(/^https:\/\/\//i, 'https://')
+    .replace(/:\/\/(.+?):333(?=\/|$)/i, '://$1:3333');
+
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `http://${normalized}`;
+  }
+
+  return normalized.replace(/\/$/, '');
 }
 
 function getHostFromExpo() {
@@ -35,6 +50,23 @@ function getHostFromExpo() {
   }
 
   return null;
+}
+
+function decodeJwtPayload(token: string): Record<string, any> | null {
+  const parts = token.split('.');
+
+  if (parts.length < 2) {
+    return null;
+  }
+
+  try {
+    const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = payloadBase64 + '='.repeat((4 - (payloadBase64.length % 4)) % 4);
+    const decoded = atob(padded);
+    return JSON.parse(decoded) as Record<string, any>;
+  } catch {
+    return null;
+  }
 }
 
 export function getAuthBaseUrl() {
@@ -67,35 +99,75 @@ export function getAuthBaseUrl() {
   return 'http://localhost:3333';
 }
 
-export async function signInWithGoogleMobile(idToken: string): Promise<AuthSession> {
+export async function signInWithGoogleMobile(params: {
+  idToken: string;
+  clientId?: string;
+  platform?: 'web' | 'android' | 'ios';
+}): Promise<AuthSession> {
   const baseUrl = getAuthBaseUrl();
-  let response: Response;
+  const platform = params.platform ?? (Platform.OS === 'web' ? 'web' : Platform.OS === 'ios' ? 'ios' : 'android');
+  const tokenClaims = decodeJwtPayload(params.idToken);
+  const endpoints =
+    platform === 'web'
+      ? ['/auth/google', '/auth/google/mobile']
+      : ['/auth/google/mobile', '/auth/google'];
 
-  try {
-    response = await fetch(`${baseUrl}/auth/google/mobile`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ idToken }),
-    });
-  } catch {
-    throw new Error(`Não foi possível conectar na API (${baseUrl}). Verifique rede e firewall.`);
+  let response: Response | null = null;
+  let payload: any = null;
+  let lastNetworkError: unknown = null;
+
+  for (const endpoint of endpoints) {
+    try {
+      response = await fetch(`${baseUrl}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          idToken: params.idToken,
+          id_token: params.idToken,
+          token: params.idToken,
+          credential: params.idToken,
+          clientId: params.clientId,
+          platform,
+          tokenAudience: tokenClaims?.aud ?? null,
+          tokenIssuer: tokenClaims?.iss ?? null,
+        }),
+      });
+    } catch (error) {
+      lastNetworkError = error;
+      continue;
+    }
+
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (response.ok) {
+      break;
+    }
   }
 
-  let payload: any = null;
-
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
+  if (!response) {
+    const suffix = lastNetworkError ? ' (erro de rede ao tentar endpoints Google).' : '.';
+    throw new Error(`Não foi possível conectar na API (${baseUrl})${suffix} Verifique rede e firewall.`);
   }
 
   if (!response.ok) {
-    const errorMessage =
-      typeof payload?.error === 'string' ? payload.error : 'Falha na autenticação com Google.';
+    const detailedMessage =
+      typeof payload?.error === 'string' && payload.error.trim()
+        ? payload.error
+        : typeof payload?.message === 'string' && payload.message.trim()
+          ? payload.message
+          : null;
 
-    throw new Error(errorMessage);
+    if (detailedMessage) {
+      throw new Error(detailedMessage);
+    }
+
+    throw new Error(`Não foi possível conectar na API (${baseUrl}). Verifique rede e firewall.`);
   }
 
   return {
