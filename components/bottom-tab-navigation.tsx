@@ -2096,9 +2096,11 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   profileHeaderBlock: {
-    alignItems: 'center',
+    width: '100%',
+    alignItems: 'flex-start',
     marginTop: -42,
-    paddingHorizontal: 24,
+    paddingLeft: 12,
+    paddingRight: 12,
   },
   avatar: {
     width: 88,
