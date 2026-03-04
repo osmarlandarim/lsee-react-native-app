@@ -1,5 +1,5 @@
 import { Link, useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAuth } from '@/contexts/auth-context';
@@ -17,6 +17,7 @@ export default function EmailLoginScreen() {
   const [fullName, setFullName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [authFeedback, setAuthFeedback] = useState<string | null>(null);
+  const passwordInputRef = useRef<TextInput>(null);
 
   const title = useMemo(() => {
     if (mode === 'register') {
@@ -123,6 +124,9 @@ export default function EmailLoginScreen() {
         setNewPassword('');
         setConfirmPassword('');
         setResetCode('');
+        setTimeout(() => {
+          passwordInputRef.current?.focus();
+        }, 0);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Não foi possível redefinir a senha.';
         setAuthFeedback(message);
@@ -265,6 +269,7 @@ export default function EmailLoginScreen() {
           </>
         ) : mode !== 'forgot' ? (
           <TextInput
+            ref={passwordInputRef}
             value={password}
             onChangeText={(text) => {
               setPassword(text);
