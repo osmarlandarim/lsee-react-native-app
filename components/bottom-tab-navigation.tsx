@@ -4,6 +4,7 @@ import { Picker } from '@react-native-picker/picker';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import * as ImagePicker from 'expo-image-picker';
 import * as ExpoLinking from 'expo-linking';
+import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -362,57 +363,41 @@ function HomeScreen() {
   const [syncingBikeId, setSyncingBikeId] = useState<string | null>(null);
   const [syncFeedbackByBikeId, setSyncFeedbackByBikeId] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    let isMounted = true;
-
-    async function validateApi() {
-      try {
-        const response = await apiFetchAuth('/auth/status');
-
-        if (!isMounted) {
-          return;
-        }
-
-        if (!response.ok) {
-          setBikesStatus(`API respondeu ${response.status}`);
-          return;
-        }
-
-        const bikesResponse = await apiFetchAuth('/bikes');
-
-        if (!isMounted) {
-          return;
-        }
-
-        if (!bikesResponse.ok) {
-          setBikesStatus(`Não foi possível carregar bikes (${bikesResponse.status}).`);
-          return;
-        }
-
-        const bikesPayload = (await bikesResponse.json()) as BikeItem[];
-        setBikes(Array.isArray(bikesPayload) ? bikesPayload : []);
-        setBikesStatus(
-          Array.isArray(bikesPayload) && bikesPayload.length > 0
-            ? 'Bikes carregadas'
-            : 'Nenhuma bike cadastrada.'
-        );
-      } catch (error) {
-        if (!isMounted) {
-          return;
-        }
-
-        const message = error instanceof Error ? error.message : 'Erro ao validar API';
-        setBikesStatus(message);
-        setBikesStatus('Erro ao carregar bikes.');
+  const validateApi = useCallback(async () => {
+    try {
+      const response = await apiFetchAuth('/auth/status');
+      if (!response.ok) {
+        setBikesStatus(`API respondeu ${response.status}`);
+        return;
       }
+      const bikesResponse = await apiFetchAuth('/bikes');
+      if (!bikesResponse.ok) {
+        setBikesStatus(`Não foi possível carregar bikes (${bikesResponse.status}).`);
+        return;
+      }
+      const bikesPayload = (await bikesResponse.json()) as BikeItem[];
+      setBikes(Array.isArray(bikesPayload) ? bikesPayload : []);
+      setBikesStatus(
+        Array.isArray(bikesPayload) && bikesPayload.length > 0
+          ? 'Minha Bike'
+          : 'Nenhuma bike cadastrada.'
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao validar API';
+      setBikesStatus(message);
+      setBikesStatus('Erro ao carregar bikes.');
     }
-
-    validateApi();
-
-    return () => {
-      isMounted = false;
-    };
   }, []);
+
+  useEffect(() => {
+    validateApi();
+  }, [validateApi]);
+
+  useFocusEffect(
+    useCallback(() => {
+      validateApi();
+    }, [validateApi])
+  );
 
   async function handleSyncBikeActivities(bike: BikeItem) {
     try {
@@ -478,9 +463,21 @@ function HomeScreen() {
     );
   }
 
+  const navigation = require('expo-router').useNavigation?.() ?? null;
+  function handleAddBike() {
+    if (navigation) navigation.navigate('bike-form');
+  }
+  function handleEditBike(bike: BikeItem) {
+    if (navigation) navigation.navigate('bike-form', bike);
+  }
   return (
     <View style={styles.homeScreen}>
-      <Text style={styles.title}>Home</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <Text style={styles.title}>Home</Text>
+        <Pressable onPress={handleAddBike} style={({ pressed }) => [{ padding: 8 }, pressed && { opacity: 0.7 }]} accessibilityLabel="Adicionar bike">
+          <Ionicons name="add-circle" size={28} color="#2563eb" />
+        </Pressable>
+      </View>
 
       <Text style={styles.bikesStatusText}>{bikesStatus}</Text>
 
@@ -518,6 +515,16 @@ function HomeScreen() {
                       style={styles.stravaSyncIcon}
                     />
                   )}
+                </Pressable>
+                <Pressable
+                  onPress={(event) => {
+                    (event as any)?.stopPropagation?.();
+                    handleEditBike(item);
+                  }}
+                  accessibilityLabel="Editar bike"
+                  style={({ pressed }) => [{ marginLeft: 8, padding: 4 }, pressed && { opacity: 0.7 }]}
+                >
+                  <Ionicons name="create-outline" size={22} color="#374151" />
                 </Pressable>
               </View>
             </View>
@@ -663,7 +670,7 @@ function DetalheBikeScreen({ bike, onBack }: { bike: BikeItem; onBack: () => voi
 
       {resumo ? (
         <View style={styles.resumoCard}>
-          <Text style={styles.resumoSectionTitle}>Resumo Geral</Text>
+          <Text style={styles.resumoSectionTitle}>Geral</Text>
           <View style={styles.resumoMetricsRow}>
             <View style={styles.resumoMetricItem}>
               <Text style={styles.resumoLabel}>Distância</Text>
@@ -679,7 +686,7 @@ function DetalheBikeScreen({ bike, onBack }: { bike: BikeItem; onBack: () => voi
             </View>
           </View>
 
-          <Text style={styles.resumoSectionTitle}>{`Mês: ${resumo.mes}`}</Text>
+          <Text style={styles.resumoSectionTitle}>{resumo.mes ? resumo.mes.charAt(0).toUpperCase() + resumo.mes.slice(1) : ''}</Text>
           <View style={styles.resumoMetricsRow}>
             <View style={styles.resumoMetricItem}>
               <Text style={styles.resumoLabel}>Distância</Text>
@@ -1314,8 +1321,8 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
             : [];
 
         const options = list
-          .filter((item) => item && typeof item === 'object')
-          .map((item) => {
+          .filter((item: any) => item && typeof item === 'object')
+          .map((item: any) => {
             const raw = item as Record<string, unknown>;
             const idValue = raw.id ?? raw.uuid ?? raw.value;
             const codigoValue = raw.codigo ?? raw.code ?? raw.sigla ?? raw.tipoContato;
@@ -1327,7 +1334,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
               descricao: String(descricaoValue ?? ''),
             } as LookupOption;
           })
-          .filter((item) => item.id);
+          .filter((item: any) => item.id);
 
         return { options, failed: false };
       } catch {
@@ -2507,18 +2514,7 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
   },
-  syncBikeButtonPressed: {
-    opacity: 0.85,
-  },
-  syncBikeButtonDisabled: {
-    opacity: 0.7,
-  },
-  syncBikeFeedback: {
-    marginTop: 10,
-    fontSize: 12,
-    color: '#374151',
-    textAlign: 'center',
-  },
+
   stravaButton: {
     marginTop: 18,
     height: 44,
