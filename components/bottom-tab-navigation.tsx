@@ -973,9 +973,12 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
             </Pressable>
           </View>
 
-          <Pressable onPress={onSignOut} style={({ pressed }) => [styles.signOutButton, pressed && styles.signOutButtonPressed]}>
-            <Text style={styles.signOutButtonText}>Sair</Text>
-          </Pressable>
+          <View style={styles.signOutLinkContainer}>
+            <Pressable onPress={onSignOut} style={({ pressed }) => [styles.signOutLinkPressable, pressed && styles.signOutLinkPressed]}>
+              <Text style={styles.signOutLinkText}>Sair</Text>
+            </Pressable>
+          </View>
+
         </>
       ) : accountView === 'connected-apps' ? (
         <View style={styles.connectedAppsScreen}>
@@ -1694,22 +1697,23 @@ const styles = StyleSheet.create({
     color: '#B91C1C',
     textAlign: 'center',
   },
-  signOutButton: {
-    marginTop: 24,
-    height: 44,
-    minWidth: 140,
-    borderRadius: 8,
-    backgroundColor: '#EF4444',
-    alignItems: 'center',
-    justifyContent: 'center',
+  signOutLinkContainer: {
+    width: '100%',
+    alignItems: 'flex-start',
     paddingHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
   },
-  signOutButtonPressed: {
-    opacity: 0.9,
+  signOutLinkPressable: {
+    paddingVertical: 4,
+    paddingHorizontal: 4,
   },
-  signOutButtonText: {
-    color: '#FFFFFF',
+  signOutLinkPressed: {
+    opacity: 0.7,
+  },
+  signOutLinkText: {
+    color: '#DC2626',
     fontWeight: '600',
-    fontSize: 15,
+    fontSize: 14,
   },
 });
