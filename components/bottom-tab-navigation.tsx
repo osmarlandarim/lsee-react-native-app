@@ -31,6 +31,16 @@ type BikeItem = {
   principal?: boolean | null;
 };
 
+type BikeResumo = {
+  bikesTotalKm: number;
+  tempoTotal: string;
+  altimetriaTotalBike: number;
+  mes: string;
+  distanciaMes: number;
+  tempoMes: string;
+  altimetriaMes: number;
+};
+
 type DadosPessoaisForm = {
   apelido: string;
   dataNascimento: string;
@@ -348,6 +358,9 @@ function isPhoneContactType(option: LookupOption | null) {
 function HomeScreen() {
   const [bikes, setBikes] = useState<BikeItem[]>([]);
   const [bikesStatus, setBikesStatus] = useState('Carregando bikes...');
+  const [selectedBike, setSelectedBike] = useState<BikeItem | null>(null);
+  const [syncingBikeId, setSyncingBikeId] = useState<string | null>(null);
+  const [syncFeedbackByBikeId, setSyncFeedbackByBikeId] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let isMounted = true;
@@ -401,6 +414,70 @@ function HomeScreen() {
     };
   }, []);
 
+  async function handleSyncBikeActivities(bike: BikeItem) {
+    try {
+      setSyncingBikeId(bike.id);
+      setSyncFeedbackByBikeId((prev) => ({ ...prev, [bike.id]: '' }));
+
+      const response = await apiFetchAuth('/strava/activities/sync', {
+        method: 'POST',
+        body: JSON.stringify({ bikeId: bike.id }),
+      });
+
+      const rawBody = await response.text().catch(() => '');
+      let payload: any = null;
+
+      try {
+        payload = rawBody ? JSON.parse(rawBody) : null;
+      } catch {
+        payload = null;
+      }
+
+      const messageFromPayload =
+        (typeof payload?.message === 'string' && payload.message.trim()) ||
+        (Array.isArray(payload?.message) && payload.message.length > 0 && String(payload.message[0]).trim()) ||
+        (typeof payload?.error === 'string' && payload.error.trim()) ||
+        (typeof payload?.details === 'string' && payload.details.trim()) ||
+        null;
+
+      if (!response.ok) {
+        setSyncFeedbackByBikeId((prev) => ({
+          ...prev,
+          [bike.id]: messageFromPayload
+            ? `Falha ao sincronizar (${response.status}): ${messageFromPayload}`
+            : rawBody
+              ? `Falha ao sincronizar (${response.status}): ${rawBody.slice(0, 220)}`
+              : `Falha ao sincronizar (${response.status}).`,
+        }));
+        return;
+      }
+
+      setSyncFeedbackByBikeId((prev) => ({
+        ...prev,
+        [bike.id]: messageFromPayload ?? 'Sincronização concluída com sucesso.',
+      }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao sincronizar atividades do Strava.';
+      setSyncFeedbackByBikeId((prev) => ({
+        ...prev,
+        [bike.id]: message,
+      }));
+    } finally {
+      setSyncingBikeId(null);
+    }
+  }
+
+  if (selectedBike) {
+    return (
+      <DetalheBikeScreen
+        bike={selectedBike}
+        onBack={() => {
+          setSelectedBike(null);
+        }}
+      />
+    );
+  }
+
   return (
     <View style={styles.homeScreen}>
       <Text style={styles.title}>Home</Text>
@@ -412,13 +489,42 @@ function HomeScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.bikesList}
         renderItem={({ item }) => (
-          <View style={styles.bikeCard}>
+          <Pressable onPress={() => setSelectedBike(item)} style={({ pressed }) => [styles.bikeCard, pressed && styles.bikeCardPressed]}>
             <View style={styles.bikeHeaderRow}>
               <Text style={styles.bikeName}>{item.apelido?.trim() || 'Bike sem apelido'}</Text>
-              {item.principal ? <Text style={styles.bikePrincipal}>Principal</Text> : null}
+              <View style={styles.bikeHeaderActions}>
+                {item.principal ? <Text style={styles.bikePrincipal}>Principal</Text> : null}
+
+                <Pressable
+                  onPress={(event) => {
+                    (event as any)?.stopPropagation?.();
+                    void handleSyncBikeActivities(item);
+                  }}
+                  accessibilityLabel="Sincronizar com Strava"
+                  {...((Platform.OS === 'web' ? { title: 'Sincronizar com Strava' } : {}) as any)}
+                  disabled={syncingBikeId === item.id}
+                  style={({ pressed }) => [
+                    styles.syncBikeIconButton,
+                    pressed && styles.syncBikeButtonPressed,
+                    syncingBikeId === item.id && styles.syncBikeButtonDisabled,
+                  ]}>
+                  {syncingBikeId === item.id ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Image
+                      source={{
+                        uri: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cb/Strava_Logo.svg/64px-Strava_Logo.svg.png',
+                      }}
+                      style={styles.stravaSyncIcon}
+                    />
+                  )}
+                </Pressable>
+              </View>
             </View>
             <Text style={styles.bikeKm}>{`${Number(item.totalKm ?? 0).toFixed(1)} km`}</Text>
-          </View>
+
+            {syncFeedbackByBikeId[item.id] ? <Text style={styles.syncBikeFeedback}>{syncFeedbackByBikeId[item.id]}</Text> : null}
+          </Pressable>
         )}
       />
     </View>
@@ -430,6 +536,155 @@ function BuscaScreen() {
     <View style={styles.screen}>
       <Text style={styles.title}>Busca</Text>
     </View>
+  );
+}
+
+function DetalheBikeScreen({ bike, onBack }: { bike: BikeItem; onBack: () => void }) {
+  const [resumo, setResumo] = useState<BikeResumo | null>(null);
+  const [status, setStatus] = useState('Carregando resumo...');
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadResumo() {
+      try {
+        const routes = ['/bikes/obterResumo', '/bikes/obter-resumo', '/bikes/resumo'];
+        let payload: any = null;
+        let response: Response | null = null;
+        let lastErrorMessage: string | null = null;
+
+        for (const route of routes) {
+          response = await apiFetchAuth(route);
+
+          if (response.ok) {
+            payload = (await response.json().catch(() => null)) as any;
+            break;
+          }
+
+          const errorPayload = (await response.json().catch(() => null)) as any;
+          const detailedError =
+            (typeof errorPayload?.message === 'string' && errorPayload.message.trim()) ||
+            (Array.isArray(errorPayload?.message) && errorPayload.message[0]) ||
+            (typeof errorPayload?.error === 'string' && errorPayload.error.trim()) ||
+            null;
+
+          lastErrorMessage = detailedError
+            ? `Não foi possível carregar o resumo (${response.status}): ${String(detailedError)}`
+            : `Não foi possível carregar o resumo (${response.status}).`;
+
+          continue;
+        }
+
+        const source = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
+        const now = new Date();
+        const mesFallback = now.toLocaleDateString('pt-BR', { month: 'long' });
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (!response?.ok || !source || typeof source !== 'object') {
+          const bikesResponse = await apiFetchAuth('/bikes');
+
+          if (bikesResponse.ok) {
+            const bikesPayload = (await bikesResponse.json().catch(() => [])) as BikeItem[];
+            const bikesList = Array.isArray(bikesPayload) ? bikesPayload : [];
+            const totalDistance = bikesList.reduce((sum, item) => sum + Number(item.totalKm ?? 0), 0);
+
+            setResumo({
+              bikesTotalKm: totalDistance,
+              tempoTotal: '-',
+              altimetriaTotalBike: 0,
+              mes: mesFallback,
+              distanciaMes: 0,
+              tempoMes: '-',
+              altimetriaMes: 0,
+            });
+            setStatus('Resumo parcial carregado (somente distância total).');
+            return;
+          }
+
+          setStatus(lastErrorMessage ?? 'Resumo indisponível no momento.');
+          return;
+        }
+
+        const parsedResumo: BikeResumo = {
+          bikesTotalKm: Number(source?.bikesTotalKm ?? 0),
+          tempoTotal: String(source?.tempoTotal ?? '-'),
+          altimetriaTotalBike: Number(source?.altimetriaTotalBike ?? 0),
+          mes: String(source?.mes ?? mesFallback),
+          distanciaMes: Number(source?.distanciaMes ?? 0),
+          tempoMes: String(source?.tempoMes ?? '-'),
+          altimetriaMes: Number(source?.altimetriaMes ?? 0),
+        };
+
+        setResumo(parsedResumo);
+        setStatus('Resumo carregado');
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : 'Erro ao carregar resumo da bike.';
+        setStatus(message);
+      }
+    }
+
+    void loadResumo();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  return (
+    <ScrollView style={styles.bikeDetailScreen} contentContainerStyle={styles.bikeDetailContent}>
+      <View style={styles.bikeDetailHeader}>
+        <Pressable onPress={onBack} style={({ pressed }) => [styles.bikeDetailBackButton, pressed && styles.bikeDetailBackButtonPressed]}>
+          <Ionicons name="arrow-back" size={22} color="#111827" />
+        </Pressable>
+        <Text style={styles.bikeDetailHeaderTitle}>Detalhe Bike</Text>
+      </View>
+
+      <Text style={styles.bikeDetailBikeName}>{bike.apelido?.trim() || 'Bike sem apelido'}</Text>
+      <Text style={styles.bikesStatusText}>{status}</Text>
+
+      {resumo ? (
+        <View style={styles.resumoCard}>
+          <Text style={styles.resumoSectionTitle}>Resumo Geral</Text>
+          <View style={styles.resumoMetricsRow}>
+            <View style={styles.resumoMetricItem}>
+              <Text style={styles.resumoLabel}>Distância</Text>
+              <Text style={styles.resumoValue}>{`${resumo.bikesTotalKm.toFixed(1)} km`}</Text>
+            </View>
+            <View style={styles.resumoMetricItem}>
+              <Text style={styles.resumoLabel}>Tempo</Text>
+              <Text style={styles.resumoValue}>{resumo.tempoTotal}</Text>
+            </View>
+            <View style={styles.resumoMetricItem}>
+              <Text style={styles.resumoLabel}>Altimetria</Text>
+              <Text style={styles.resumoValue}>{`${resumo.altimetriaTotalBike.toFixed(0)} m`}</Text>
+            </View>
+          </View>
+
+          <Text style={styles.resumoSectionTitle}>{`Mês: ${resumo.mes}`}</Text>
+          <View style={styles.resumoMetricsRow}>
+            <View style={styles.resumoMetricItem}>
+              <Text style={styles.resumoLabel}>Distância</Text>
+              <Text style={styles.resumoValue}>{`${resumo.distanciaMes.toFixed(1)} km`}</Text>
+            </View>
+            <View style={styles.resumoMetricItem}>
+              <Text style={styles.resumoLabel}>Tempo</Text>
+              <Text style={styles.resumoValue}>{resumo.tempoMes}</Text>
+            </View>
+            <View style={styles.resumoMetricItem}>
+              <Text style={styles.resumoLabel}>Altimetria</Text>
+              <Text style={styles.resumoValue}>{`${resumo.altimetriaMes.toFixed(0)} m`}</Text>
+            </View>
+          </View>
+        </View>
+      ) : null}
+    </ScrollView>
   );
 }
 
@@ -1828,6 +2083,41 @@ const styles = StyleSheet.create({
     paddingTop: 48,
     paddingHorizontal: 18,
   },
+  bikeDetailScreen: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  bikeDetailContent: {
+    paddingTop: 20,
+    paddingHorizontal: 18,
+    paddingBottom: 24,
+    gap: 12,
+  },
+  bikeDetailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  bikeDetailBackButton: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -4,
+  },
+  bikeDetailBackButtonPressed: {
+    opacity: 0.7,
+  },
+  bikeDetailHeaderTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#111111',
+  },
+  bikeDetailBikeName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+  },
   title: {
     fontSize: 24,
     fontWeight: '600',
@@ -1850,10 +2140,86 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: '#FFFFFF',
   },
+  bikeCardPressed: {
+    opacity: 0.85,
+  },
+  syncBikeButton: {
+    marginTop: 10,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  syncBikeButtonPressed: {
+    opacity: 0.85,
+  },
+  syncBikeButtonDisabled: {
+    opacity: 0.7,
+  },
+  syncBikeButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  syncBikeFeedback: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#374151',
+  },
+  resumoCard: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    padding: 14,
+    gap: 8,
+  },
+  resumoSectionTitle: {
+    marginTop: 4,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  resumoMetricsRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 10,
+  },
+  resumoMetricItem: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    minHeight: 64,
+  },
+  resumoLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  resumoValue: {
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
   bikeHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
+  },
+  bikeHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
   bikeName: {
@@ -2120,6 +2486,30 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 14,
     color: '#6B7280',
+  },
+  syncBikeIconButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FC4C02',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stravaSyncIcon: {
+    width: 16,
+    height: 16,
+  },
+  syncBikeButtonPressed: {
+    opacity: 0.85,
+  },
+  syncBikeButtonDisabled: {
+    opacity: 0.7,
+  },
+  syncBikeFeedback: {
+    marginTop: 10,
+    fontSize: 12,
+    color: '#374151',
+    textAlign: 'center',
   },
   stravaButton: {
     marginTop: 18,
