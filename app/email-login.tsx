@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { useAuth } from '@/contexts/auth-context';
-import { forgotPassword, registerWithEmailPassword, resetPassword, signInWithEmailPassword } from '@/services/auth';
+import { forgotPassword, registerWithEmailPassword, resetPasswordWithCode, signInWithEmailPassword } from '@/services/auth';
 
 export default function EmailLoginScreen() {
   const router = useRouter();
@@ -13,7 +13,7 @@ export default function EmailLoginScreen() {
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [resetToken, setResetToken] = useState('');
+  const [resetCode, setResetCode] = useState('');
   const [fullName, setFullName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [authFeedback, setAuthFeedback] = useState<string | null>(null);
@@ -71,10 +71,26 @@ export default function EmailLoginScreen() {
     }
 
     if (mode === 'reset') {
-      if (!resetToken.trim() || !newPassword.trim()) {
-        const message = 'Preencha token e nova senha.';
+      if (!normalizedEmail) {
+        const message = 'Campo email é obrigatório para reset por código.';
+        setAuthFeedback(message);
+        Alert.alert('Campo obrigatório', message);
+        return;
+      }
+
+      if (!resetCode.trim() || !newPassword.trim()) {
+        const message = 'Preencha código e nova senha.';
         setAuthFeedback(message);
         Alert.alert('Campos obrigatórios', message);
+        return;
+      }
+
+      const normalizedCode = resetCode.replace(/\D/g, '');
+
+      if (normalizedCode.length !== 6) {
+        const message = 'O código de recuperação deve ter 6 dígitos.';
+        setAuthFeedback(message);
+        Alert.alert('Código inválido', message);
         return;
       }
 
@@ -94,7 +110,11 @@ export default function EmailLoginScreen() {
 
       try {
         setIsSubmitting(true);
-        const response = await resetPassword({ token: resetToken.trim(), newPassword: newPassword.trim() });
+        const response = await resetPasswordWithCode({
+          email: normalizedEmail,
+          code: normalizedCode,
+          newPassword: newPassword.trim(),
+        });
         const message = response?.message ?? 'Senha redefinida com sucesso.';
         setAuthFeedback(message);
         Alert.alert('Senha redefinida', message);
@@ -102,7 +122,7 @@ export default function EmailLoginScreen() {
         setPassword('');
         setNewPassword('');
         setConfirmPassword('');
-        setResetToken('');
+        setResetCode('');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Não foi possível redefinir a senha.';
         setAuthFeedback(message);
@@ -180,7 +200,7 @@ export default function EmailLoginScreen() {
           />
         ) : null}
 
-        {(mode === 'login' || mode === 'register' || mode === 'forgot') ? (
+        {(mode === 'login' || mode === 'register' || mode === 'forgot' || mode === 'reset') ? (
           <TextInput
             value={email}
             onChangeText={(text) => {
@@ -200,16 +220,18 @@ export default function EmailLoginScreen() {
         {mode === 'reset' ? (
           <>
             <TextInput
-              value={resetToken}
+              value={resetCode}
               onChangeText={(text) => {
-                setResetToken(text);
+                const digits = text.replace(/\D/g, '').slice(0, 6);
+                setResetCode(digits);
                 if (authFeedback) {
                   setAuthFeedback(null);
                 }
               }}
               style={styles.input}
-              placeholder="Token de recuperação"
+              placeholder="Código de recuperação (6 dígitos)"
               placeholderTextColor="#9CA3AF"
+              keyboardType="number-pad"
               autoCapitalize="none"
             />
             <TextInput
@@ -307,7 +329,7 @@ export default function EmailLoginScreen() {
               setMode('reset');
               setAuthFeedback(null);
             }}>
-            <Text style={styles.linkText}>Já tenho token de recuperação</Text>
+            <Text style={styles.linkText}>Já tenho código de recuperação</Text>
           </Pressable>
         ) : null}
 

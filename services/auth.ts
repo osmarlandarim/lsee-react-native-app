@@ -331,6 +331,54 @@ export async function resetPassword(params: { token: string; newPassword: string
   return payload;
 }
 
+export async function resetPasswordWithCode(params: {
+  email: string;
+  code: string;
+  newPassword: string;
+}) {
+  if (!params.email.trim()) {
+    throw new Error('Campo email é obrigatório para reset por código.');
+  }
+
+  const baseUrl = getAuthBaseUrl();
+  let response: Response;
+
+  try {
+    response = await fetch(`${baseUrl}/auth/password/reset/code`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: params.email.trim(),
+        code: params.code,
+        newPassword: params.newPassword,
+      }),
+    });
+  } catch {
+    throw new Error(`Não foi possível conectar na API (${baseUrl}). Verifique rede e firewall.`);
+  }
+
+  const payload = (await response.json().catch(() => null)) as {
+    success?: boolean;
+    message?: string;
+    accessToken?: string;
+    tokenType?: string;
+    error?: string;
+    details?: string;
+  } | null;
+
+  if (!response.ok) {
+    throw new Error(extractApiMessage(payload) ?? 'Não foi possível redefinir a senha com código.');
+  }
+
+  if (payload?.success === false) {
+    throw new Error(extractApiMessage(payload) ?? 'Não foi possível redefinir a senha com código.');
+  }
+
+  return payload;
+}
+
 export async function getStoredSession(): Promise<AuthSession | null> {
   let raw: string | null = null;
 
