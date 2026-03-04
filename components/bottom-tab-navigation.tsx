@@ -4,7 +4,6 @@ import { Picker } from '@react-native-picker/picker';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import * as ImagePicker from 'expo-image-picker';
 import * as ExpoLinking from 'expo-linking';
-import * as SecureStore from 'expo-secure-store';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -232,8 +231,16 @@ function normalizeImageUri(uri: string | null | undefined) {
 
 function extractFotoCapaFromPayload(payload: any): string | null {
   const visited = new WeakSet<object>();
+  const looksLikeCoverPath = (value: string) => {
+    const normalized = value.trim().toLowerCase();
+    return normalized.includes('/static/') || normalized.includes('/uploads/') || normalized.includes('capa');
+  };
 
   function search(node: any): string | null {
+    if (typeof node === 'string' && node.trim()) {
+      return looksLikeCoverPath(node) ? node : null;
+    }
+
     if (!node || typeof node !== 'object') {
       return null;
     }
@@ -435,6 +442,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   const [stravaStatus, setStravaStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
   const [stravaFeedback, setStravaFeedback] = useState<string | null>(null);
   const [coverPhotoUri, setCoverPhotoUri] = useState<string | null>(apiCoverPhotoUri);
+  const isCustomCoverPhoto = Boolean(coverPhotoUri && coverPhotoUri !== defaultCoverPhotoUri);
   const [coverPhotoFeedback, setCoverPhotoFeedback] = useState<string | null>(null);
   const [personalDataId, setPersonalDataId] = useState<string | null>(null);
   const [personalDataForm, setPersonalDataForm] = useState<DadosPessoaisForm>(createEmptyDadosPessoaisForm);
@@ -452,7 +460,6 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [changePasswordFeedback, setChangePasswordFeedback] = useState<string | null>(null);
-  const coverPhotoStorageKey = `lsee.cover_photo.${profile.usuarioId}`;
   const stravaReturnTo = useMemo(() => ExpoLinking.createURL('/'), []);
 
   const loadStravaStatus = useCallback(async () => {
@@ -528,37 +535,6 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   useEffect(() => {
     let isMounted = true;
 
-    async function loadStoredCoverPhoto() {
-      try {
-        const storedCoverPhotoUri = await SecureStore.getItemAsync(coverPhotoStorageKey);
-        const normalizedStoredCoverPhotoUri = normalizeImageUri(storedCoverPhotoUri);
-
-        if (!isMounted) {
-          return;
-        }
-
-        setCoverPhotoUri(normalizedStoredCoverPhotoUri ?? apiCoverPhotoUri);
-        setCoverPhotoFeedback(null);
-      } catch {
-        if (!isMounted) {
-          return;
-        }
-
-        setCoverPhotoUri(apiCoverPhotoUri);
-        setCoverPhotoFeedback(null);
-      }
-    }
-
-    void loadStoredCoverPhoto();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [apiCoverPhotoUri, coverPhotoStorageKey]);
-
-  useEffect(() => {
-    let isMounted = true;
-
     async function loadCoverPhotoFromApi() {
       const routes = [
         `/usuarios/${profile.usuarioId}/foto-capa`,
@@ -605,7 +581,6 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
           }
 
           setCoverPhotoUri(normalizedFotoCapa);
-          await SecureStore.setItemAsync(coverPhotoStorageKey, String(normalizedFotoCapa));
           return;
         } catch {
           continue;
@@ -618,7 +593,43 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
     return () => {
       isMounted = false;
     };
-  }, [apiCoverPhotoUri, coverPhotoStorageKey, profile.usuarioId]);
+  }, [apiCoverPhotoUri, profile.usuarioId]);
+
+  const fetchLatestCoverPhotoFromApi = useCallback(async () => {
+    const routes = [
+      `/usuarios/${profile.usuarioId}/foto-capa`,
+      `/usuarios/${profile.usuarioId}`,
+      '/usuarios/me',
+      '/usuario',
+      `/usuario/${profile.usuarioId}`,
+    ];
+
+    for (const route of routes) {
+      try {
+        const response = await apiFetchAuth(route);
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            continue;
+          }
+
+          continue;
+        }
+
+        const payload = await response.json().catch(() => null);
+        const rawFotoCapa = extractFotoCapaFromPayload(payload);
+        const normalizedFotoCapa = normalizeImageUri(rawFotoCapa);
+
+        if (normalizedFotoCapa) {
+          return normalizedFotoCapa;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  }, [profile.usuarioId]);
 
   async function handleStravaLogin() {
     try {
@@ -672,6 +683,49 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   }
 
   async function saveCoverPhotoOnApi(nextFotoCapa: string | null) {
+    if (nextFotoCapa === null) {
+      const removeRoute = `/usuarios/${profile.usuarioId}/foto-capa`;
+
+      try {
+        const response = await apiFetchAuth(removeRoute, {
+          method: 'DELETE',
+        });
+
+        if (response.ok) {
+          return { response, failure: null };
+        }
+
+        let failureDetails: string | null = null;
+
+        try {
+          const text = await response.text();
+          failureDetails = text?.slice(0, 220) ?? null;
+        } catch {
+          failureDetails = null;
+        }
+
+        return {
+          response,
+          failure: {
+            method: 'DELETE',
+            route: removeRoute,
+            status: response.status,
+            details: failureDetails,
+          },
+        };
+      } catch {
+        return {
+          response: null,
+          failure: {
+            method: 'DELETE',
+            route: removeRoute,
+            status: 0,
+            details: 'network-error',
+          },
+        };
+      }
+    }
+
     if (nextFotoCapa) {
       const uploadRoute = `/usuarios/${profile.usuarioId}/foto-capa/upload`;
       const uploadPayloadCandidates = [
@@ -737,7 +791,6 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
       '/users/me',
       `/users/${profile.usuarioId}`,
       '/auth/me',
-      '/auth/status',
     ];
     const methods: Array<'PATCH' | 'PUT' | 'POST'> = ['PATCH', 'PUT', 'POST'];
     const payloadCandidates = [
@@ -872,14 +925,13 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
       const savedCoverPhotoUri = normalizeImageUri(savedFotoCapaRaw) ?? savedFotoCapaRaw;
 
       setCoverPhotoUri(savedCoverPhotoUri);
-      await SecureStore.setItemAsync(coverPhotoStorageKey, String(savedCoverPhotoUri));
     } catch {
-      setStravaFeedback('A foto de capa foi aplicada, mas não foi possível salvar no dispositivo.');
+      setStravaFeedback('A foto de capa foi aplicada, mas não foi possível confirmar o salvamento na API.');
     }
   }
 
   async function handleRemoveCoverPhoto() {
-    setCoverPhotoUri(apiCoverPhotoUri);
+    setCoverPhotoUri(defaultCoverPhotoUri);
     setCoverPhotoFeedback(null);
 
     try {
@@ -901,13 +953,22 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
         savePayload?.foto_capa ??
         savePayload?.profile?.fotoCapa ??
         savePayload?.profile?.foto_capa ??
-        apiCoverPhotoUri;
-      const savedCoverPhotoUri = normalizeImageUri(savedFotoCapaRaw) ?? apiCoverPhotoUri;
+        defaultCoverPhotoUri;
+      const savedCoverPhotoUri = normalizeImageUri(savedFotoCapaRaw) ?? defaultCoverPhotoUri;
 
       setCoverPhotoUri(savedCoverPhotoUri);
-      await SecureStore.deleteItemAsync(coverPhotoStorageKey);
+
+      const latestCoverFromApi = await fetchLatestCoverPhotoFromApi();
+
+      if (latestCoverFromApi && latestCoverFromApi !== defaultCoverPhotoUri) {
+        setCoverPhotoUri(latestCoverFromApi);
+        setCoverPhotoFeedback('A API ainda retornou uma capa personalizada após excluir.');
+        return;
+      }
+
+      setCoverPhotoUri(defaultCoverPhotoUri);
     } catch {
-      setStravaFeedback('A foto de capa foi removida, mas não foi possível atualizar o armazenamento local.');
+      setStravaFeedback('A foto de capa foi removida localmente, mas não foi possível confirmar na API.');
     }
   }
 
@@ -1286,12 +1347,12 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
                   style={styles.coverPhotoImage}
                   onError={(event) => {
                     const nativeError = (event.nativeEvent as any)?.error;
-                    const isUsingLocalCover = Boolean(apiCoverPhotoUri) && coverPhotoUri !== apiCoverPhotoUri;
+                    const currentCoverUri = (coverPhotoUri ?? '').trim();
+                    const isUsingLocalCover = /^(data:|blob:|file:|content:)/i.test(currentCoverUri);
 
                     if (isUsingLocalCover) {
                       setCoverPhotoUri(apiCoverPhotoUri);
                       setCoverPhotoFeedback('A capa local falhou; exibindo capa padrão da API.');
-                      void SecureStore.deleteItemAsync(coverPhotoStorageKey);
                     } else {
                       const message = `Falha ao carregar capa (${nativeError ?? 'erro desconhecido'}). URL: ${coverPhotoUri}`;
                       setCoverPhotoFeedback(message);
@@ -1317,7 +1378,7 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
 
             {coverPhotoFeedback ? <Text style={styles.profileFeedback}>{coverPhotoFeedback}</Text> : null}
 
-            {coverPhotoUri ? (
+            {isCustomCoverPhoto ? (
               <Pressable
                 onPress={handleRemoveCoverPhoto}
                 style={({ pressed }) => [styles.removeCoverIconButton, pressed && styles.removeCoverIconButtonPressed]}>
