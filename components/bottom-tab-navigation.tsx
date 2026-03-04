@@ -540,23 +540,16 @@ function BuscaScreen() {
 }
 
 
+// Converte valor decimal de horas para XhYYm
 function formatBikeTime(val: string | number | null | undefined): string {
-  if (val == null || val === '-' || val === '') return '-';
-  let totalMinutes: number | null = null;
-  if (typeof val === 'number') {
-    totalMinutes = val;
-  } else if (/^\d+$/.test(val)) {
-    totalMinutes = parseInt(val, 10);
-  } else if (/^(\d+)[h:](\d+)[m]?$/.test(val)) {
-    // Already formatted as 327h46m or 327:46
-    return val.replace(':', 'h') + (val.includes('m') ? '' : 'm');
-  } else {
-    return val;
+  if (val == null) return '-';
+  const num = typeof val === 'number' ? val : parseFloat(String(val).replace(',', '.'));
+  if (!isNaN(num)) {
+    const h = Math.trunc(num);
+    const m = Math.trunc((num - h) * 60);
+    return `${h}h${m.toString().padStart(2, '0')}m`;
   }
-  if (totalMinutes == null || isNaN(totalMinutes)) return String(val);
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return `${h}h${m.toString().padStart(2, '0')}m`;
+  return String(val);
 }
 
 function DetalheBikeScreen({ bike, onBack }: { bike: BikeItem; onBack: () => void }) {
