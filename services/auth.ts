@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 
 type ApiProfile = {
   usuarioId: string;
-  googleId: string;
+  googleId?: string | null;
   email: string | null;
   name: string | null;
   picture: string | null;
@@ -102,6 +102,233 @@ export async function signInWithGoogleMobile(idToken: string): Promise<AuthSessi
     accessToken: payload.accessToken,
     profile: payload.profile,
   };
+}
+
+async function parseAuthError(response: Response) {
+  const payload = await response.json().catch(() => null);
+
+  if (typeof payload?.error === 'string' && payload.error.trim()) {
+    return payload.error;
+  }
+
+  if (typeof payload?.message === 'string' && payload.message.trim()) {
+    return payload.message;
+  }
+
+  if (Array.isArray(payload?.message) && payload.message.length > 0) {
+    return String(payload.message[0] ?? '').trim() || null;
+  }
+
+  if (typeof payload?.details === 'string' && payload.details.trim()) {
+    return payload.details;
+  }
+
+  return null;
+}
+
+function extractApiMessage(payload: any) {
+  if (typeof payload?.error === 'string' && payload.error.trim()) {
+    return payload.error;
+  }
+
+  if (typeof payload?.message === 'string' && payload.message.trim()) {
+    return payload.message;
+  }
+
+  if (Array.isArray(payload?.message) && payload.message.length > 0) {
+    return String(payload.message[0] ?? '').trim() || null;
+  }
+
+  if (typeof payload?.details === 'string' && payload.details.trim()) {
+    return payload.details;
+  }
+
+  return null;
+}
+
+export async function signInWithEmailPassword(email: string, password: string): Promise<AuthSession> {
+  const baseUrl = getAuthBaseUrl();
+  let response: Response;
+
+  try {
+    response = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch {
+    throw new Error(`Não foi possível conectar na API (${baseUrl}). Verifique rede e firewall.`);
+  }
+
+  if (!response.ok) {
+    const errorMessage = await parseAuthError(response);
+    throw new Error(errorMessage ?? 'Falha na autenticação com e-mail e senha.');
+  }
+
+  const payload = (await response.json()) as {
+    accessToken: string;
+    profile: ApiProfile;
+  };
+
+  return {
+    accessToken: payload.accessToken,
+    profile: payload.profile,
+  };
+}
+
+export async function registerWithEmailPassword(params: {
+  email: string;
+  password: string;
+  fullName?: string;
+}): Promise<AuthSession> {
+  const baseUrl = getAuthBaseUrl();
+  let response: Response;
+
+  try {
+    response = await fetch(`${baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: params.email,
+        password: params.password,
+        fullName: params.fullName,
+      }),
+    });
+  } catch {
+    throw new Error(`Não foi possível conectar na API (${baseUrl}). Verifique rede e firewall.`);
+  }
+
+  if (!response.ok) {
+    const errorMessage = await parseAuthError(response);
+    throw new Error(errorMessage ?? 'Falha ao criar conta com e-mail e senha.');
+  }
+
+  const payload = (await response.json()) as {
+    accessToken: string;
+    profile: ApiProfile;
+  };
+
+  return {
+    accessToken: payload.accessToken,
+    profile: payload.profile,
+  };
+}
+
+export async function changePasswordLocal(params: {
+  currentPassword: string;
+  newPassword: string;
+}) {
+  const accessToken = await getStoredAccessToken();
+
+  if (!accessToken) {
+    throw new Error('Usuário não autenticado.');
+  }
+
+  const baseUrl = getAuthBaseUrl();
+  const response = await fetch(`${baseUrl}/auth/password/change`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      currentPassword: params.currentPassword,
+      newPassword: params.newPassword,
+    }),
+  });
+
+  const payload = (await response.json().catch(() => null)) as {
+    success?: boolean;
+    message?: string;
+    error?: string;
+    details?: string;
+  } | null;
+
+  if (!response.ok) {
+    const message = extractApiMessage(payload);
+    throw new Error(message ?? 'Não foi possível alterar a senha.');
+  }
+
+  if (payload?.success === false) {
+    const message = extractApiMessage(payload);
+    throw new Error(message ?? 'Não foi possível alterar a senha.');
+  }
+
+  return payload;
+}
+
+export async function forgotPassword(email: string) {
+  const baseUrl = getAuthBaseUrl();
+  let response: Response;
+
+  try {
+    response = await fetch(`${baseUrl}/auth/password/forgot`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email }),
+    });
+  } catch {
+    throw new Error(`Não foi possível conectar na API (${baseUrl}). Verifique rede e firewall.`);
+  }
+
+  const payload = (await response.json().catch(() => null)) as {
+    success?: boolean;
+    message?: string;
+    error?: string;
+    details?: string;
+  } | null;
+
+  if (!response.ok) {
+    throw new Error(extractApiMessage(payload) ?? 'Não foi possível iniciar a recuperação de senha.');
+  }
+
+  if (payload?.success === false) {
+    throw new Error(extractApiMessage(payload) ?? 'Não foi possível iniciar a recuperação de senha.');
+  }
+
+  return payload;
+}
+
+export async function resetPassword(params: { token: string; newPassword: string }) {
+  const baseUrl = getAuthBaseUrl();
+  let response: Response;
+
+  try {
+    response = await fetch(`${baseUrl}/auth/password/reset`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ token: params.token, newPassword: params.newPassword }),
+    });
+  } catch {
+    throw new Error(`Não foi possível conectar na API (${baseUrl}). Verifique rede e firewall.`);
+  }
+
+  const payload = (await response.json().catch(() => null)) as {
+    success?: boolean;
+    message?: string;
+    accessToken?: string;
+    tokenType?: string;
+    error?: string;
+    details?: string;
+  } | null;
+
+  if (!response.ok) {
+    throw new Error(extractApiMessage(payload) ?? 'Não foi possível redefinir a senha.');
+  }
+
+  if (payload?.success === false) {
+    throw new Error(extractApiMessage(payload) ?? 'Não foi possível redefinir a senha.');
+  }
+
+  return payload;
 }
 
 export async function getStoredSession(): Promise<AuthSession | null> {

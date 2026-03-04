@@ -1,9 +1,9 @@
-import { Ionicons } from '@expo/vector-icons';
 import { makeRedirectUri } from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
 import Constants from 'expo-constants';
+import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -17,13 +17,9 @@ import {
 } from 'react-native';
 
 import BottomTabNavigation from '@/components/bottom-tab-navigation';
+import { useAuth } from '@/contexts/auth-context';
 import {
-    clearStoredSession,
-    getAuthBaseUrl,
-    getStoredSession,
-    saveStoredSession,
     signInWithGoogleMobile,
-    type AuthSession,
 } from '@/services/auth';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -61,18 +57,9 @@ const GOOGLE_CLIENT_ID_EFFECTIVE = IS_WEB
   : GOOGLE_ANDROID_CLIENT_ID_EFFECTIVE;
 
 export default function IndexScreen() {
-  const [session, setSession] = useState<AuthSession | null>(null);
-  const [isHydrating, setIsHydrating] = useState(true);
+  const router = useRouter();
+  const { session, isHydrating, setAuthenticatedSession, signOut } = useAuth();
   const [isAuthenticating, setIsAuthenticating] = useState(false);
-  const [authFeedback, setAuthFeedback] = useState<string | null>(null);
-
-  const currentWebOrigin = useMemo(() => {
-    if (!IS_WEB || typeof window === 'undefined') {
-      return null;
-    }
-
-    return window.location.origin;
-  }, []);
 
   const googleRedirectUri = useMemo(
     () => {
@@ -80,23 +67,13 @@ export default function IndexScreen() {
         return normalizeWebRedirectUri(GOOGLE_WEB_REDIRECT_URI);
       }
 
-      if (IS_WEB && currentWebOrigin) {
-        return normalizeWebRedirectUri(currentWebOrigin);
-      }
-
       return makeRedirectUri({
         scheme: 'lseeapp',
         preferLocalhost: true,
       });
     },
-    [currentWebOrigin]
+    []
   );
-
-  const isWebOriginDifferentFromRedirect =
-    IS_WEB &&
-    currentWebOrigin &&
-    GOOGLE_WEB_REDIRECT_URI?.trim() &&
-    normalizeWebRedirectUri(currentWebOrigin) !== normalizeWebRedirectUri(GOOGLE_WEB_REDIRECT_URI);
 
   const [request, , promptAsync] = Google.useIdTokenAuthRequest({
     androidClientId: GOOGLE_ANDROID_CLIENT_ID_EFFECTIVE ?? 'MISSING_ANDROID_CLIENT_ID',
@@ -105,30 +82,14 @@ export default function IndexScreen() {
     redirectUri: googleRedirectUri,
   });
 
-  const googleRequestRedirectUri = useMemo(() => {
-    if (!request?.url) {
-      return null;
-    }
-
-    try {
-      const parsed = new URL(request.url);
-      return parsed.searchParams.get('redirect_uri');
-    } catch {
-      return null;
-    }
-  }, [request?.url]);
-
-  const authBaseUrl = useMemo(() => getAuthBaseUrl(), []);
-
   const completeLoginWithIdToken = useCallback(async (idToken: string) => {
     const nextSession = await signInWithGoogleMobile(idToken);
-    await saveStoredSession(nextSession);
-    setSession(nextSession);
-  }, []);
+    await setAuthenticatedSession(nextSession);
+  }, [setAuthenticatedSession]);
 
   const processGoogleAuthResult = useCallback(async (result: any) => {
     if (!result) {
-      setAuthFeedback('Login não retornou resposta do Google. Verifique bloqueio de pop-up no navegador.');
+      Alert.alert('Login não concluído', 'Login não retornou resposta do Google. Verifique bloqueio de pop-up no navegador.');
       return;
     }
 
@@ -152,7 +113,6 @@ export default function IndexScreen() {
           ? `${feedback} ${providerErrorDescription}`
           : feedback;
 
-      setAuthFeedback(feedbackWithDescription);
       Alert.alert('Login não concluído', feedbackWithDescription);
       return;
     }
@@ -160,54 +120,32 @@ export default function IndexScreen() {
     const idToken = result.params?.id_token ?? result.authentication?.idToken;
 
     if (!idToken) {
-      setAuthFeedback('Google autenticou, mas não retornou idToken.');
       Alert.alert('Falha no login', 'Google autenticou, mas não retornou idToken para a API.');
       return;
     }
 
     try {
       setIsAuthenticating(true);
-      setAuthFeedback(null);
       await completeLoginWithIdToken(idToken);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Erro inesperado de autenticação.';
-      setAuthFeedback(message);
       Alert.alert('Falha no login', message);
     } finally {
       setIsAuthenticating(false);
     }
   }, [completeLoginWithIdToken]);
 
-  useEffect(() => {
-    async function hydrateSession() {
-      try {
-        const storedSession = await getStoredSession();
-
-        if (storedSession) {
-          setSession(storedSession);
-        }
-      } finally {
-        setIsHydrating(false);
-      }
-    }
-
-    hydrateSession();
-  }, []);
-
   const handleGoogleSignInPress = useCallback(async () => {
     try {
       const result = await promptAsync();
       await processGoogleAuthResult(result);
     } catch {
-      const feedback = 'Não foi possível iniciar o login Google. Verifique bloqueio de pop-up e tente novamente.';
-      setAuthFeedback(feedback);
-      Alert.alert('Login não concluído', feedback);
+      Alert.alert('Login não concluído', 'Não foi possível iniciar o login Google. Verifique bloqueio de pop-up e tente novamente.');
     }
   }, [processGoogleAuthResult, promptAsync]);
 
   async function handleSignOut() {
-    await clearStoredSession();
-    setSession(null);
+    await signOut();
   }
 
   if (isHydrating) {
@@ -228,10 +166,6 @@ export default function IndexScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <Ionicons name="lock-closed-outline" size={56} color="#1F2937" />
-        <Text style={styles.title}>Entrar</Text>
-        <Text style={styles.subtitle}>Faça login com sua conta Google para continuar.</Text>
-
         <Pressable
           disabled={!request || isAuthenticating || isGoogleConfigMissing}
           onPress={handleGoogleSignInPress}
@@ -251,54 +185,11 @@ export default function IndexScreen() {
           </Text>
         </Pressable>
 
-        <Text style={styles.baseUrlText}>API: {authBaseUrl}/auth/google/mobile</Text>
-
-        {IS_WEB ? (
-          <Text style={styles.baseUrlText}>
-            Web OAuth redirectUri em uso: {googleRedirectUri}
-          </Text>
-        ) : null}
-
-        {IS_WEB && googleRequestRedirectUri ? (
-          <Text style={styles.baseUrlText}>
-            redirect_uri enviado ao Google: {googleRequestRedirectUri}
-          </Text>
-        ) : null}
-
-        {IS_WEB && currentWebOrigin ? (
-          <Text style={styles.baseUrlText}>Origem Web atual: {currentWebOrigin}</Text>
-        ) : null}
-
-        {isWebOriginDifferentFromRedirect ? (
-          <Text style={styles.warningText}>
-            A origem atual do navegador está diferente do redirect URI configurado no .env. Use a mesma porta nos dois lados.
-          </Text>
-        ) : null}
-
-        {IS_WEB && !GOOGLE_WEB_REDIRECT_URI?.trim() ? (
-          <Text style={styles.baseUrlText}>
-            Dica: defina EXPO_PUBLIC_GOOGLE_WEB_REDIRECT_URI no .env para fixar o redirect URI no Google Cloud.
-          </Text>
-        ) : null}
-
-        {IS_WEB ? (
-          <Text style={styles.baseUrlText}>
-            No Google Cloud (OAuth Client Web), adicione também o origin atual
-            (ex.: http://localhost:8088) em Authorized JavaScript origins.
-          </Text>
-        ) : null}
-
-        {authFeedback ? <Text style={styles.warningText}>{authFeedback}</Text> : null}
-
-        {isGoogleConfigMissing ? (
-          <Text style={styles.warningText}>
-            {IS_EXPO_GO
-              ? 'No Expo Go, defina EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (ou EXPO_PUBLIC_GOOGLE_CLIENT_ID).'
-              : IS_WEB
-                ? 'No Web, defina EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (ou EXPO_PUBLIC_GOOGLE_CLIENT_ID).'
-                : 'Defina EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID (ou EXPO_PUBLIC_GOOGLE_CLIENT_ID) no app para habilitar login Google no Android.'}
-          </Text>
-        ) : null}
+        <Pressable
+          onPress={() => router.push('/email-login' as never)}
+          style={({ pressed }) => [styles.emailButton, pressed && styles.emailButtonPressed]}>
+          <Text style={styles.emailButtonText}>Entrar com email</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
@@ -314,20 +205,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
-    gap: 14,
-  },
-  title: {
-    fontSize: 30,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  subtitle: {
-    fontSize: 15,
-    color: '#4B5563',
-    textAlign: 'center',
+    gap: 12,
   },
   googleButton: {
-    marginTop: 8,
     width: '100%',
     maxWidth: 320,
     height: 52,
@@ -355,17 +235,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1F2937',
   },
-  baseUrlText: {
-    marginTop: 2,
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
+  emailButton: {
+    width: '100%',
+    maxWidth: 320,
+    height: 52,
+    borderRadius: 8,
+    backgroundColor: '#111827',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  warningText: {
-    marginTop: 4,
-    fontSize: 12,
-    color: '#B91C1C',
-    textAlign: 'center',
+  emailButtonPressed: {
+    opacity: 0.9,
+  },
+  emailButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   loadingContainer: {
     flex: 1,

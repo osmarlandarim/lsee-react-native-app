@@ -10,7 +10,7 @@ import { ActivityIndicator, Alert, FlatList, Image, Linking, Platform, Pressable
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { apiFetchAuth } from '@/services/api-client';
-import { getAuthBaseUrl, type AuthSession } from '@/services/auth';
+import { changePasswordLocal, getAuthBaseUrl, type AuthSession } from '@/services/auth';
 
 type RootTabParamList = {
   Home: undefined;
@@ -340,7 +340,7 @@ function BuscaScreen() {
 
 function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   const { profile } = session;
-  const [accountView, setAccountView] = useState<'menu' | 'connected-apps' | 'personal-data'>('menu');
+  const [accountView, setAccountView] = useState<'menu' | 'connected-apps' | 'personal-data' | 'change-password'>('menu');
   const [stravaStatus, setStravaStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
   const [stravaFeedback, setStravaFeedback] = useState<string | null>(null);
   const [coverPhotoUri, setCoverPhotoUri] = useState<string | null>(null);
@@ -355,6 +355,11 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   const [isSavingPersonalData, setIsSavingPersonalData] = useState(false);
   const [personalDataFeedback, setPersonalDataFeedback] = useState<string | null>(null);
   const [tipoContatoLookupFeedback, setTipoContatoLookupFeedback] = useState<string | null>(null);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [changePasswordFeedback, setChangePasswordFeedback] = useState<string | null>(null);
   const coverPhotoStorageKey = `lsee.cover_photo.${profile.usuarioId}`;
   const stravaReturnTo = useMemo(() => ExpoLinking.createURL('/'), []);
 
@@ -845,6 +850,43 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
     }
   }
 
+  async function handleChangePassword() {
+    if (!currentPassword.trim() || !newPassword.trim() || !confirmNewPassword.trim()) {
+      setChangePasswordFeedback('Preencha a senha atual, a nova senha e a confirmação.');
+      return;
+    }
+
+    if (newPassword.trim().length < 6) {
+      setChangePasswordFeedback('A nova senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setChangePasswordFeedback('A confirmação da nova senha não confere.');
+      return;
+    }
+
+    try {
+      setIsChangingPassword(true);
+      setChangePasswordFeedback(null);
+
+      const payload = await changePasswordLocal({
+        currentPassword: currentPassword.trim(),
+        newPassword: newPassword.trim(),
+      });
+
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setChangePasswordFeedback(payload?.message ?? 'Senha alterada com sucesso.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Não foi possível alterar a senha.';
+      setChangePasswordFeedback(message);
+    } finally {
+      setIsChangingPassword(false);
+    }
+  }
+
   function openPersonalDataScreen() {
     setAccountView('personal-data');
     void loadPersonalData();
@@ -919,6 +961,16 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
               <Text style={styles.accountMenuText}>Dados Pessoais</Text>
               <Ionicons name="chevron-forward" size={20} color="#6B7280" />
             </Pressable>
+
+            <Pressable
+              onPress={() => {
+                setAccountView('change-password');
+                setChangePasswordFeedback(null);
+              }}
+              style={({ pressed }) => [styles.accountMenuItem, pressed && styles.accountMenuItemPressed]}>
+              <Text style={styles.accountMenuText}>Trocar senha</Text>
+              <Ionicons name="chevron-forward" size={20} color="#6B7280" />
+            </Pressable>
           </View>
 
           <Pressable onPress={onSignOut} style={({ pressed }) => [styles.signOutButton, pressed && styles.signOutButtonPressed]}>
@@ -943,6 +995,72 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
           </Pressable>
 
           {stravaFeedback ? <Text style={styles.profileFeedback}>{stravaFeedback}</Text> : null}
+        </View>
+      ) : accountView === 'change-password' ? (
+        <View style={styles.connectedAppsScreen}>
+          <View style={styles.connectedAppsHeader}>
+            <Pressable onPress={() => setAccountView('menu')} style={styles.connectedAppsBackButton}>
+              <Ionicons name="chevron-back" size={20} color="#111827" />
+            </Pressable>
+            <Text style={styles.connectedAppsTitle}>Trocar senha</Text>
+          </View>
+
+          <View style={styles.personalDataFormContainer}>
+            <View style={styles.personalDataFieldBlock}>
+              <Text style={styles.personalDataFieldLabel}>Senha atual</Text>
+              <TextInput
+                value={currentPassword}
+                onChangeText={setCurrentPassword}
+                style={styles.personalDataInput}
+                placeholder="Digite sua senha atual"
+                placeholderTextColor="#9CA3AF"
+                secureTextEntry
+                autoCapitalize="none"
+              />
+            </View>
+
+            <View style={styles.personalDataFieldBlock}>
+              <Text style={styles.personalDataFieldLabel}>Nova senha</Text>
+              <TextInput
+                value={newPassword}
+                onChangeText={setNewPassword}
+                style={styles.personalDataInput}
+                placeholder="Digite a nova senha"
+                placeholderTextColor="#9CA3AF"
+                secureTextEntry
+                autoCapitalize="none"
+              />
+              <Text style={styles.personalDataInfoText}>Mínimo de 6 caracteres.</Text>
+            </View>
+
+            <View style={styles.personalDataFieldBlock}>
+              <Text style={styles.personalDataFieldLabel}>Confirmar nova senha</Text>
+              <TextInput
+                value={confirmNewPassword}
+                onChangeText={setConfirmNewPassword}
+                style={styles.personalDataInput}
+                placeholder="Repita a nova senha"
+                placeholderTextColor="#9CA3AF"
+                secureTextEntry
+                autoCapitalize="none"
+              />
+            </View>
+
+            <Pressable
+              onPress={handleChangePassword}
+              disabled={isChangingPassword}
+              style={({ pressed }) => [
+                styles.personalDataSaveButton,
+                pressed && styles.personalDataSaveButtonPressed,
+                isChangingPassword && styles.personalDataSaveButtonDisabled,
+              ]}>
+              <Text style={styles.personalDataSaveButtonText}>
+                {isChangingPassword ? 'Alterando...' : 'Salvar nova senha'}
+              </Text>
+            </Pressable>
+
+            {changePasswordFeedback ? <Text style={styles.profileFeedback}>{changePasswordFeedback}</Text> : null}
+          </View>
         </View>
       ) : (
         <View style={styles.connectedAppsScreen}>
