@@ -27,6 +27,7 @@ export default function AuthButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
+        !isDark && styles.buttonLight,
         isDark && styles.buttonDark,
         pressed && styles.buttonPressed,
         isDisabled && styles.buttonDisabled,
@@ -46,7 +47,6 @@ export default function AuthButton({
 const styles = StyleSheet.create({
   button: {
     width: '100%',
-    maxWidth: 320,
     height: 52,
     borderRadius: 8,
     borderWidth: 1,
@@ -57,9 +57,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
   },
+  buttonLight: {
+    maxWidth: 320,
+  },
   buttonDark: {
     height: 48,
-    maxWidth: undefined,
     borderWidth: 0,
     backgroundColor: '#111827',
   },
