@@ -210,6 +210,94 @@ function toDigitsOnly(value: string) {
   return value.replace(/\D/g, '');
 }
 
+function normalizeImageUri(uri: string | null | undefined) {
+  const trimmed = typeof uri === 'string' ? uri.trim() : '';
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^(https?:|data:|file:|content:|blob:)/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  const baseUrl = getAuthBaseUrl();
+
+  if (trimmed.startsWith('/')) {
+    return `${baseUrl}${trimmed}`;
+  }
+
+  return `${baseUrl}/${trimmed}`;
+}
+
+function extractFotoCapaFromPayload(payload: any): string | null {
+  const visited = new WeakSet<object>();
+
+  function search(node: any): string | null {
+    if (!node || typeof node !== 'object') {
+      return null;
+    }
+
+    if (visited.has(node)) {
+      return null;
+    }
+
+    visited.add(node);
+
+    const directCamel = node.fotoCapa;
+    if (typeof directCamel === 'string' && directCamel.trim()) {
+      return directCamel;
+    }
+
+    const directSnake = node.foto_capa;
+    if (typeof directSnake === 'string' && directSnake.trim()) {
+      return directSnake;
+    }
+
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const foundInArray = search(item);
+
+        if (foundInArray) {
+          return foundInArray;
+        }
+      }
+
+      return null;
+    }
+
+    for (const key of Object.keys(node)) {
+      const foundInChild = search(node[key]);
+
+      if (foundInChild) {
+        return foundInChild;
+      }
+    }
+
+    return null;
+  }
+
+  return search(payload);
+}
+
+async function convertImageUriToDataUrl(uri: string) {
+  const response = await fetch(uri);
+  const blob = await response.blob();
+
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Não foi possível converter a imagem para data URL.'));
+      }
+    };
+    reader.onerror = () => reject(new Error('Erro ao ler imagem selecionada.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
 function normalizeDecimalInput(value: string) {
   const normalized = value.trim().replace(',', '.');
 
@@ -340,10 +428,14 @@ function BuscaScreen() {
 
 function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   const { profile } = session;
+  const defaultCoverPhotoUri = normalizeImageUri('/static/defaults/LSeeCapaDefaut.png');
+  const apiCoverPhotoUri =
+    normalizeImageUri(profile.fotoCapa ?? (profile as any).foto_capa ?? null) ?? defaultCoverPhotoUri;
   const [accountView, setAccountView] = useState<'menu' | 'connected-apps' | 'personal-data' | 'change-password'>('menu');
   const [stravaStatus, setStravaStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
   const [stravaFeedback, setStravaFeedback] = useState<string | null>(null);
-  const [coverPhotoUri, setCoverPhotoUri] = useState<string | null>(null);
+  const [coverPhotoUri, setCoverPhotoUri] = useState<string | null>(apiCoverPhotoUri);
+  const [coverPhotoFeedback, setCoverPhotoFeedback] = useState<string | null>(null);
   const [personalDataId, setPersonalDataId] = useState<string | null>(null);
   const [personalDataForm, setPersonalDataForm] = useState<DadosPessoaisForm>(createEmptyDadosPessoaisForm);
   const [birthDatePickerVisible, setBirthDatePickerVisible] = useState(false);
@@ -439,18 +531,21 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
     async function loadStoredCoverPhoto() {
       try {
         const storedCoverPhotoUri = await SecureStore.getItemAsync(coverPhotoStorageKey);
+        const normalizedStoredCoverPhotoUri = normalizeImageUri(storedCoverPhotoUri);
 
         if (!isMounted) {
           return;
         }
 
-        setCoverPhotoUri(storedCoverPhotoUri ?? null);
+        setCoverPhotoUri(normalizedStoredCoverPhotoUri ?? apiCoverPhotoUri);
+        setCoverPhotoFeedback(null);
       } catch {
         if (!isMounted) {
           return;
         }
 
-        setCoverPhotoUri(null);
+        setCoverPhotoUri(apiCoverPhotoUri);
+        setCoverPhotoFeedback(null);
       }
     }
 
@@ -459,7 +554,71 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
     return () => {
       isMounted = false;
     };
-  }, [coverPhotoStorageKey]);
+  }, [apiCoverPhotoUri, coverPhotoStorageKey]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadCoverPhotoFromApi() {
+      const routes = [
+        `/usuarios/${profile.usuarioId}/foto-capa`,
+        `/usuarios/${profile.usuarioId}`,
+        '/usuarios/me',
+        '/usuario',
+        `/usuario/${profile.usuarioId}`,
+        '/auth/status',
+      ];
+
+      for (const route of routes) {
+        try {
+          const response = await apiFetchAuth(route);
+
+          if (!response.ok) {
+            if (response.status === 404) {
+              continue;
+            }
+
+            continue;
+          }
+
+          const payload = await response.json().catch(() => null);
+          const rawFotoCapa = extractFotoCapaFromPayload(payload);
+
+          if (!rawFotoCapa) {
+            continue;
+          }
+
+          const normalizedFotoCapa = normalizeImageUri(rawFotoCapa);
+
+          if (!normalizedFotoCapa) {
+            continue;
+          }
+
+          console.log('[MinhaConta] Foto capa recebida da API', {
+            route,
+            rawFotoCapa,
+            normalizedFotoCapa,
+          });
+
+          if (!isMounted) {
+            return;
+          }
+
+          setCoverPhotoUri(normalizedFotoCapa);
+          await SecureStore.setItemAsync(coverPhotoStorageKey, String(normalizedFotoCapa));
+          return;
+        } catch {
+          continue;
+        }
+      }
+    }
+
+    void loadCoverPhotoFromApi();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [apiCoverPhotoUri, coverPhotoStorageKey, profile.usuarioId]);
 
   async function handleStravaLogin() {
     try {
@@ -512,6 +671,140 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
     }
   }
 
+  async function saveCoverPhotoOnApi(nextFotoCapa: string | null) {
+    if (nextFotoCapa) {
+      const uploadRoute = `/usuarios/${profile.usuarioId}/foto-capa/upload`;
+      const uploadPayloadCandidates = [
+        { imageBase64: nextFotoCapa },
+        { dataUrl: nextFotoCapa },
+        { base64: nextFotoCapa },
+      ];
+
+      let uploadFailure: { method: string; route: string; status: number; details: string | null } | null = null;
+
+      for (const payload of uploadPayloadCandidates) {
+        try {
+          const response = await apiFetchAuth(uploadRoute, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+
+          if (response.ok) {
+            return { response, failure: null };
+          }
+
+          let failureDetails: string | null = null;
+
+          try {
+            const text = await response.text();
+            failureDetails = text?.slice(0, 220) ?? null;
+          } catch {
+            failureDetails = null;
+          }
+
+          uploadFailure = {
+            method: 'POST',
+            route: uploadRoute,
+            status: response.status,
+            details: failureDetails,
+          };
+
+          if (response.status === 400 || response.status === 404 || response.status === 405 || response.status === 415 || response.status === 422) {
+            continue;
+          }
+
+          return { response, failure: uploadFailure };
+        } catch {
+          uploadFailure = {
+            method: 'POST',
+            route: uploadRoute,
+            status: 0,
+            details: 'network-error',
+          };
+        }
+      }
+
+      if (uploadFailure) {
+        console.log('[MinhaConta] Falha no endpoint de upload de capa, tentando fallback legado', uploadFailure);
+      }
+    }
+
+    const routes = [
+      '/usuario',
+      `/usuario/${profile.usuarioId}`,
+      '/usuarios/me',
+      `/usuarios/${profile.usuarioId}`,
+      '/users/me',
+      `/users/${profile.usuarioId}`,
+      '/auth/me',
+      '/auth/status',
+    ];
+    const methods: Array<'PATCH' | 'PUT' | 'POST'> = ['PATCH', 'PUT', 'POST'];
+    const payloadCandidates = [
+      { fotoCapa: nextFotoCapa, foto_capa: nextFotoCapa },
+      { picture_url: nextFotoCapa, coverPhoto: nextFotoCapa },
+      { profile: { fotoCapa: nextFotoCapa, foto_capa: nextFotoCapa } },
+      { usuario: { fotoCapa: nextFotoCapa, foto_capa: nextFotoCapa } },
+    ];
+
+    let lastFailure: { method: string; route: string; status: number; details: string | null } | null = null;
+
+    for (const method of methods) {
+      for (const route of routes) {
+        for (const payload of payloadCandidates) {
+          let response: Response;
+
+          try {
+            response = await apiFetchAuth(route, {
+              method,
+              body: JSON.stringify(payload),
+            });
+          } catch {
+            lastFailure = {
+              method,
+              route,
+              status: 0,
+              details: 'network-error',
+            };
+            continue;
+          }
+
+          if (response.ok) {
+            return { response, failure: null };
+          }
+
+          let failureDetails: string | null = null;
+
+          try {
+            const text = await response.text();
+            failureDetails = text?.slice(0, 220) ?? null;
+          } catch {
+            failureDetails = null;
+          }
+
+          lastFailure = {
+            method,
+            route,
+            status: response.status,
+            details: failureDetails,
+          };
+
+          if (response.status === 404 || response.status === 405) {
+            continue;
+          }
+
+          if (response.status === 400 || response.status === 422) {
+            continue;
+          }
+
+          return { response, failure: lastFailure };
+        }
+      }
+    }
+
+    return { response: null, failure: lastFailure };
+  }
+
   async function handleSelectCoverPhoto() {
     if (Platform.OS !== 'web') {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -527,26 +820,91 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
       allowsEditing: true,
       quality: 0.9,
       aspect: [16, 7],
+      base64: true,
     });
 
     if (result.canceled || !result.assets?.[0]?.uri) {
       return;
     }
 
-    const nextCoverPhotoUri = result.assets[0].uri;
+    const selectedAsset = result.assets[0];
+    const mimeType = selectedAsset.mimeType ?? 'image/jpeg';
+    let fotoCapaPayload: string;
+
+    if (selectedAsset.base64) {
+      fotoCapaPayload = `data:${mimeType};base64,${selectedAsset.base64}`;
+    } else if (selectedAsset.uri.startsWith('data:')) {
+      fotoCapaPayload = selectedAsset.uri;
+    } else {
+      try {
+        fotoCapaPayload = await convertImageUriToDataUrl(selectedAsset.uri);
+      } catch {
+        setCoverPhotoFeedback('Não foi possível converter a imagem para upload na API.');
+        return;
+      }
+    }
+
+    const nextCoverPhotoUri = normalizeImageUri(fotoCapaPayload) ?? fotoCapaPayload;
+
     setCoverPhotoUri(nextCoverPhotoUri);
+    setCoverPhotoFeedback(null);
 
     try {
-      await SecureStore.setItemAsync(coverPhotoStorageKey, nextCoverPhotoUri);
+      const saveResult = await saveCoverPhotoOnApi(fotoCapaPayload);
+      const saveResponse = saveResult.response;
+
+      if (!saveResponse?.ok) {
+        const failureInfo = saveResult.failure
+          ? ` (${saveResult.failure.method} ${saveResult.failure.route} -> ${saveResult.failure.status})`
+          : '';
+        setCoverPhotoFeedback(`A capa foi atualizada localmente, mas não foi possível salvar na API${failureInfo}.`);
+        console.log('[MinhaConta] Falha ao salvar capa na API', saveResult.failure);
+        return;
+      }
+
+      const savePayload = saveResponse ? await saveResponse.json().catch(() => null) : null;
+      const savedFotoCapaRaw =
+        savePayload?.fotoCapa ??
+        savePayload?.foto_capa ??
+        savePayload?.profile?.fotoCapa ??
+        savePayload?.profile?.foto_capa ??
+        fotoCapaPayload;
+      const savedCoverPhotoUri = normalizeImageUri(savedFotoCapaRaw) ?? savedFotoCapaRaw;
+
+      setCoverPhotoUri(savedCoverPhotoUri);
+      await SecureStore.setItemAsync(coverPhotoStorageKey, String(savedCoverPhotoUri));
     } catch {
       setStravaFeedback('A foto de capa foi aplicada, mas não foi possível salvar no dispositivo.');
     }
   }
 
   async function handleRemoveCoverPhoto() {
-    setCoverPhotoUri(null);
+    setCoverPhotoUri(apiCoverPhotoUri);
+    setCoverPhotoFeedback(null);
 
     try {
+      const saveResult = await saveCoverPhotoOnApi(null);
+      const saveResponse = saveResult.response;
+
+      if (!saveResponse?.ok) {
+        const failureInfo = saveResult.failure
+          ? ` (${saveResult.failure.method} ${saveResult.failure.route} -> ${saveResult.failure.status})`
+          : '';
+        setCoverPhotoFeedback(`Não foi possível limpar a capa na API${failureInfo}. Exibindo capa local padrão.`);
+        console.log('[MinhaConta] Falha ao limpar capa na API', saveResult.failure);
+        return;
+      }
+
+      const savePayload = saveResponse ? await saveResponse.json().catch(() => null) : null;
+      const savedFotoCapaRaw =
+        savePayload?.fotoCapa ??
+        savePayload?.foto_capa ??
+        savePayload?.profile?.fotoCapa ??
+        savePayload?.profile?.foto_capa ??
+        apiCoverPhotoUri;
+      const savedCoverPhotoUri = normalizeImageUri(savedFotoCapaRaw) ?? apiCoverPhotoUri;
+
+      setCoverPhotoUri(savedCoverPhotoUri);
       await SecureStore.deleteItemAsync(coverPhotoStorageKey);
     } catch {
       setStravaFeedback('A foto de capa foi removida, mas não foi possível atualizar o armazenamento local.');
@@ -923,7 +1281,32 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
               onPress={handleSelectCoverPhoto}
               style={({ pressed }) => [styles.coverPhotoTouchArea, pressed && styles.coverPhotoTouchAreaPressed]}>
               {coverPhotoUri ? (
-                <Image source={{ uri: coverPhotoUri }} style={styles.coverPhotoImage} />
+                <Image
+                  source={{ uri: coverPhotoUri }}
+                  style={styles.coverPhotoImage}
+                  onError={(event) => {
+                    const nativeError = (event.nativeEvent as any)?.error;
+                    const isUsingLocalCover = Boolean(apiCoverPhotoUri) && coverPhotoUri !== apiCoverPhotoUri;
+
+                    if (isUsingLocalCover) {
+                      setCoverPhotoUri(apiCoverPhotoUri);
+                      setCoverPhotoFeedback('A capa local falhou; exibindo capa padrão da API.');
+                      void SecureStore.deleteItemAsync(coverPhotoStorageKey);
+                    } else {
+                      const message = `Falha ao carregar capa (${nativeError ?? 'erro desconhecido'}). URL: ${coverPhotoUri}`;
+                      setCoverPhotoFeedback(message);
+                    }
+
+                    const message = `Falha ao carregar capa (${nativeError ?? 'erro desconhecido'}). URL: ${coverPhotoUri}`;
+                    console.log('[MinhaConta] Erro ao carregar capa', {
+                      coverPhotoUri,
+                      apiCoverPhotoUri,
+                      isUsingLocalCover,
+                      nativeError,
+                      message,
+                    });
+                  }}
+                />
               ) : (
                 <View style={styles.coverPhotoPlaceholder}>
                   <Ionicons name="image-outline" size={28} color="#6B7280" />
@@ -931,6 +1314,8 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
                 </View>
               )}
             </Pressable>
+
+            {coverPhotoFeedback ? <Text style={styles.profileFeedback}>{coverPhotoFeedback}</Text> : null}
 
             {coverPhotoUri ? (
               <Pressable

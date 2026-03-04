@@ -8,6 +8,7 @@ type ApiProfile = {
   email: string | null;
   name: string | null;
   picture: string | null;
+  fotoCapa?: string | null;
 };
 
 export type AuthSession = {
@@ -67,6 +68,17 @@ function decodeJwtPayload(token: string): Record<string, any> | null {
   } catch {
     return null;
   }
+}
+
+function normalizeApiProfile(profile: any): ApiProfile {
+  return {
+    usuarioId: String(profile?.usuarioId ?? profile?.id ?? ''),
+    googleId: profile?.googleId ?? profile?.google_id ?? null,
+    email: profile?.email ?? null,
+    name: profile?.name ?? profile?.full_name ?? null,
+    picture: profile?.picture ?? profile?.picture_url ?? null,
+    fotoCapa: profile?.fotoCapa ?? profile?.foto_capa ?? null,
+  };
 }
 
 export function getAuthBaseUrl() {
@@ -172,7 +184,7 @@ export async function signInWithGoogleMobile(params: {
 
   return {
     accessToken: payload.accessToken,
-    profile: payload.profile,
+    profile: normalizeApiProfile(payload?.profile),
   };
 }
 
@@ -246,7 +258,7 @@ export async function signInWithEmailPassword(email: string, password: string): 
 
   return {
     accessToken: payload.accessToken,
-    profile: payload.profile,
+    profile: normalizeApiProfile(payload?.profile),
   };
 }
 
@@ -286,7 +298,7 @@ export async function registerWithEmailPassword(params: {
 
   return {
     accessToken: payload.accessToken,
-    profile: payload.profile,
+    profile: normalizeApiProfile(payload?.profile),
   };
 }
 
