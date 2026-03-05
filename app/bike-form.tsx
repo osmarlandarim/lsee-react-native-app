@@ -1,7 +1,7 @@
 import { Picker } from '@react-native-picker/picker';
 import { useNavigation } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Button, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export type BikeFormParams = {
   id?: string;
@@ -141,75 +141,86 @@ export default function BikeFormScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>{apelido.trim() ? apelido : (isEdit ? 'Bike' : 'Nova Bike')}</Text>
-      <Text style={styles.label}>Apelido</Text>
-      <TextInput style={styles.input} value={apelido} onChangeText={setApelido} placeholder="Nome da bike" />
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={80}
+    >
+      <ScrollView
+        style={{ flex: 1, backgroundColor: '#fff' }}
+        contentContainerStyle={{ padding: 24, paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={true}
+      >
+        <Text style={styles.title}>{apelido.trim() ? apelido : (isEdit ? 'Bike' : 'Nova Bike')}</Text>
+        <Text style={styles.label}>Apelido</Text>
+        <TextInput style={styles.input} value={apelido} onChangeText={setApelido} placeholder="Nome da bike" />
 
-      <Text style={styles.label}>Quilometragem total</Text>
-      <TextInput style={styles.input} value={totalKm} onChangeText={setTotalKm} placeholder="Ex: 1234.5" keyboardType="numeric" />
+        <Text style={styles.label}>Quilometragem total</Text>
+        <TextInput style={styles.input} value={totalKm} onChangeText={setTotalKm} placeholder="Ex: 1234.5" keyboardType="numeric" />
 
-      <Text style={styles.label}>Cor</Text>
-      <TextInput style={styles.input} value={cor} onChangeText={setCor} placeholder="Cor da bike" />
+        <Text style={styles.label}>Cor</Text>
+        <TextInput style={styles.input} value={cor} onChangeText={setCor} placeholder="Cor da bike" />
 
-      <Text style={styles.label}>Tamanho da roda</Text>
-      <TextInput
-        style={styles.input}
-        value={tamanhoRoda}
-        onChangeText={setTamanhoRoda}
-        placeholder="Ex: 29.5"
-        keyboardType="decimal-pad"
-      />
+        <Text style={styles.label}>Tamanho da roda</Text>
+        <TextInput
+          style={styles.input}
+          value={tamanhoRoda}
+          onChangeText={setTamanhoRoda}
+          placeholder="Ex: 29.5"
+          keyboardType="decimal-pad"
+        />
 
-      <Text style={styles.label}>Ano</Text>
-      <TextInput style={styles.input} value={ano} onChangeText={setAno} placeholder="Ex: 2022" keyboardType="numeric" />
+        <Text style={styles.label}>Ano</Text>
+        <TextInput style={styles.input} value={ano} onChangeText={setAno} placeholder="Ex: 2022" keyboardType="numeric" />
 
-      <Text style={styles.label}>Peso (kg)</Text>
-      <TextInput style={styles.input} value={peso} onChangeText={setPeso} placeholder="Ex: 12.5" keyboardType="numeric" />
+        <Text style={styles.label}>Peso (kg)</Text>
+        <TextInput style={styles.input} value={peso} onChangeText={setPeso} placeholder="Ex: 12.5" keyboardType="numeric" />
 
-      <Text style={styles.label}>Número de série</Text>
-      <TextInput style={styles.input} value={numeroSerie ?? ''} onChangeText={setNumeroSerie} placeholder="Número de série" />
+        <Text style={styles.label}>Número de série</Text>
+        <TextInput style={styles.input} value={numeroSerie ?? ''} onChangeText={setNumeroSerie} placeholder="Número de série" />
 
-      <View style={styles.checkRow}>
-        <CheckBox label="Ativo" checked={ativo} onChange={setAtivo} />
-        <CheckBox label="Principal" checked={principal} onChange={setPrincipal} />
-        <CheckBox label="Visível" checked={visivel} onChange={setVisivel} />
-      </View>
-      <Text style={styles.label}>Marca</Text>
-      <View style={styles.input}>
-        <Picker
-          selectedValue={marcaId}
-          onValueChange={setMarcaId}
-          enabled={!marcasLoading}
-        >
-          <Picker.Item label={marcasLoading ? 'Carregando...' : 'Selecione a marca'} value="" />
-          {marcas.map((marca) => (
-            <Picker.Item key={marca.id} label={marca.nome} value={marca.id} />
-          ))}
-        </Picker>
-      </View>
+        <View style={styles.checkRow}>
+          <CheckBox label="Ativo" checked={ativo} onChange={setAtivo} />
+          <CheckBox label="Principal" checked={principal} onChange={setPrincipal} />
+          <CheckBox label="Visível" checked={visivel} onChange={setVisivel} />
+        </View>
+        <Text style={styles.label}>Marca</Text>
+        <View style={styles.input}>
+          <Picker
+            selectedValue={marcaId}
+            onValueChange={setMarcaId}
+            enabled={!marcasLoading}
+          >
+            <Picker.Item label={marcasLoading ? 'Carregando...' : 'Selecione a marca'} value="" />
+            {marcas.map((marca) => (
+              <Picker.Item key={marca.id} label={marca.nome} value={marca.id} />
+            ))}
+          </Picker>
+        </View>
 
-      <Text style={styles.label}>Modelo</Text>
-      <TextInput style={styles.input} value={modelo} onChangeText={setModelo} placeholder="Modelo da bike" />
+        <Text style={styles.label}>Modelo</Text>
+        <TextInput style={styles.input} value={modelo} onChangeText={setModelo} placeholder="Modelo da bike" />
 
-          <Text style={styles.label}>Tipo de Bike</Text>
-          <View style={styles.input}>
-            <Picker
-              selectedValue={tipoBikeId}
-              onValueChange={setTipoBikeId}
-              enabled={!tiposLoading}
-            >
-              <Picker.Item label={tiposLoading ? 'Carregando...' : 'Selecione o tipo'} value="" />
-              {tiposBike.map((tipo) => (
-                <Picker.Item key={tipo.id} label={tipo.descricao} value={tipo.id} />
-              ))}
-            </Picker>
-          </View>
-      <View style={styles.buttonRow}>
-        <Button title="Salvar" onPress={handleSave} disabled={loading} />
-        <Button title="Cancelar" onPress={() => navigation.goBack()} color="#888" />
-      </View>
-    </View>
+        <Text style={styles.label}>Tipo de Bike</Text>
+        <View style={styles.input}>
+          <Picker
+            selectedValue={tipoBikeId}
+            onValueChange={setTipoBikeId}
+            enabled={!tiposLoading}
+          >
+            <Picker.Item label={tiposLoading ? 'Carregando...' : 'Selecione o tipo'} value="" />
+            {tiposBike.map((tipo) => (
+              <Picker.Item key={tipo.id} label={tipo.descricao} value={tipo.id} />
+            ))}
+          </Picker>
+        </View>
+        <View style={styles.buttonRow}>
+          <Button title="Salvar" onPress={handleSave} disabled={loading} />
+          <Button title="Cancelar" onPress={() => navigation.goBack()} color="#888" />
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

@@ -692,92 +692,100 @@ function DetalheBikeScreen({ bike, onBack }: { bike: BikeItem; onBack: () => voi
   }, []);
 
   return (
-    <ScrollView style={styles.bikeDetailScreen} contentContainerStyle={styles.bikeDetailContent}>
-      <View style={styles.bikeDetailHeader}>
-        <Pressable onPress={onBack} style={({ pressed }) => [styles.bikeDetailBackButton, pressed && styles.bikeDetailBackButtonPressed]}>
-          <Ionicons name="arrow-back" size={22} color="#111827" />
-        </Pressable>
-        <Text style={styles.bikeDetailHeaderTitle}>{bike.apelido?.trim() || 'Bike sem apelido'}</Text>
-      </View>
-
-      {status !== 'Resumo carregado' ? <Text style={styles.bikesStatusText}>{status}</Text> : null}
-
-      {resumo ? (
-        <View style={styles.resumoCard}>
-          <Text style={styles.resumoSectionTitle}>Geral</Text>
-          <View style={styles.resumoMetricsRow}>
-            <View style={styles.resumoMetricItem}>
-              <Text style={styles.resumoLabel}>Distância</Text>
-              <Text style={styles.resumoValue}>{`${resumo.bikesTotalKm.toFixed(1)} km`}</Text>
-            </View>
-            <View style={styles.resumoMetricItem}>
-              <Text style={styles.resumoLabel}>Tempo</Text>
-              <Text style={styles.resumoValue}>{formatBikeTime(resumo.tempoTotal)}</Text>
-            </View>
-            <View style={styles.resumoMetricItem}>
-              <Text style={styles.resumoLabel}>Altimetria</Text>
-              <Text style={styles.resumoValue}>{`${resumo.altimetriaTotalBike.toFixed(0)} m`}</Text>
-            </View>
-          </View>
-
-          <Text style={styles.resumoSectionTitle}>{resumo.mes ? resumo.mes.charAt(0).toUpperCase() + resumo.mes.slice(1) : ''}</Text>
-          <View style={styles.resumoMetricsRow}>
-            <View style={styles.resumoMetricItem}>
-              <Text style={styles.resumoLabel}>Distância</Text>
-              <Text style={styles.resumoValue}>{`${resumo.distanciaMes.toFixed(1)} km`}</Text>
-            </View>
-            <View style={styles.resumoMetricItem}>
-              <Text style={styles.resumoLabel}>Tempo</Text>
-              <Text style={styles.resumoValue}>{formatBikeTime(resumo.tempoMes)}</Text>
-            </View>
-            <View style={styles.resumoMetricItem}>
-              <Text style={styles.resumoLabel}>Altimetria</Text>
-              <Text style={styles.resumoValue}>{`${resumo.altimetriaMes.toFixed(0)} m`}</Text>
-            </View>
-          </View>
+    <View style={{ flex: 1 }}>
+      <ScrollView
+        style={styles.bikeDetailScreen}
+        contentContainerStyle={[styles.bikeDetailContent, { flexGrow: 1 }]}
+        showsVerticalScrollIndicator={true}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.bikeDetailHeader}>
+          <Pressable onPress={onBack} style={({ pressed }) => [styles.bikeDetailBackButton, pressed && styles.bikeDetailBackButtonPressed]}>
+            <Ionicons name="arrow-back" size={22} color="#111827" />
+          </Pressable>
+          <Text style={styles.bikeDetailHeaderTitle}>{bike.apelido?.trim() || 'Bike sem apelido'}</Text>
         </View>
-      ) : null}
 
-      {/* Gráfico de barras de distância mensal */}
-      <View style={{ marginTop: 18, marginBottom: 8 }}>
-        <Text style={styles.resumoSectionTitle}>Distância mensal (km)</Text>
-        {loadingDistancia ? (
-          <ActivityIndicator size="small" color="#2563eb" style={{ marginTop: 12 }} />
-        ) : erroDistancia ? (
-          <Text style={{ color: '#B91C1C', marginTop: 8 }}>{erroDistancia}</Text>
-        ) : distanciaMensal.length === 0 ? (
-          <Text style={{ color: '#6B7280', marginTop: 8 }}>Sem dados de distância mensal.</Text>
-        ) : (
-          <BarChart
-            data={{
-              labels: distanciaMensal.map(item => `${item.mes.toString().padStart(2, '0')}/${item.ano.toString().slice(-2)}`),
-              datasets: [
-                {
-                  data: distanciaMensal.map(item => Number(item.soma_distancia) || 0),
-                },
-              ],
-            }}
-            width={Math.min(Dimensions.get('window').width - 36, 480)}
-            height={220}
-            yAxisSuffix=" km"
-            fromZero
-            showValuesOnTopOfBars
-            chartConfig={{
-              backgroundColor: '#fff',
-              backgroundGradientFrom: '#fff',
-              backgroundGradientTo: '#fff',
-              decimalPlaces: 1,
-              color: (opacity = 1) => `rgba(37, 99, 235, ${opacity})`,
-              labelColor: (opacity = 1) => `rgba(55, 65, 81, ${opacity})`,
-              style: { borderRadius: 8 },
-              propsForBackgroundLines: { stroke: '#E5E7EB' },
-              propsForLabels: { fontSize: 11 },
-            }}
-            style={{ borderRadius: 8 }}
-          />
-        )}
-      </View>
-    </ScrollView>
+        {status !== 'Resumo carregado' ? <Text style={styles.bikesStatusText}>{status}</Text> : null}
+
+        {resumo ? (
+          <View style={styles.resumoCard}>
+            <Text style={styles.resumoSectionTitle}>Geral</Text>
+            <View style={styles.resumoMetricsRow}>
+              <View style={styles.resumoMetricItem}>
+                <Text style={styles.resumoLabel}>Distância</Text>
+                <Text style={styles.resumoValue}>{`${resumo.bikesTotalKm.toFixed(1)} km`}</Text>
+              </View>
+              <View style={styles.resumoMetricItem}>
+                <Text style={styles.resumoLabel}>Tempo</Text>
+                <Text style={styles.resumoValue}>{formatBikeTime(resumo.tempoTotal)}</Text>
+              </View>
+              <View style={styles.resumoMetricItem}>
+                <Text style={styles.resumoLabel}>Altimetria</Text>
+                <Text style={styles.resumoValue}>{`${resumo.altimetriaTotalBike.toFixed(0)} m`}</Text>
+              </View>
+            </View>
+
+            <Text style={styles.resumoSectionTitle}>{resumo.mes ? resumo.mes.charAt(0).toUpperCase() + resumo.mes.slice(1) : ''}</Text>
+            <View style={styles.resumoMetricsRow}>
+              <View style={styles.resumoMetricItem}>
+                <Text style={styles.resumoLabel}>Distância</Text>
+                <Text style={styles.resumoValue}>{`${resumo.distanciaMes.toFixed(1)} km`}</Text>
+              </View>
+              <View style={styles.resumoMetricItem}>
+                <Text style={styles.resumoLabel}>Tempo</Text>
+                <Text style={styles.resumoValue}>{formatBikeTime(resumo.tempoMes)}</Text>
+              </View>
+              <View style={styles.resumoMetricItem}>
+                <Text style={styles.resumoLabel}>Altimetria</Text>
+                <Text style={styles.resumoValue}>{`${resumo.altimetriaMes.toFixed(0)} m`}</Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
+        {/* Gráfico de barras de distância mensal */}
+        <View style={{ marginTop: 18, marginBottom: 8 }}>
+          <Text style={styles.resumoSectionTitle}>Distância mensal (km)</Text>
+          {loadingDistancia ? (
+            <ActivityIndicator size="small" color="#2563eb" style={{ marginTop: 12 }} />
+          ) : erroDistancia ? (
+            <Text style={{ color: '#B91C1C', marginTop: 8 }}>{erroDistancia}</Text>
+          ) : distanciaMensal.length === 0 ? (
+            <Text style={{ color: '#6B7280', marginTop: 8 }}>Sem dados de distância mensal.</Text>
+          ) : (
+            <BarChart
+              data={{
+                labels: distanciaMensal.map(item => `${item.mes.toString().padStart(2, '0')}/${item.ano.toString().slice(-2)}`),
+                datasets: [
+                  {
+                    data: distanciaMensal.map(item => Number(item.soma_distancia) || 0),
+                  },
+                ],
+              }}
+              width={Math.min(Dimensions.get('window').width - 36, 480)}
+              height={220}
+              yAxisLabel=""
+              yAxisSuffix=" km"
+              fromZero
+              showValuesOnTopOfBars
+              chartConfig={{
+                backgroundColor: '#fff',
+                backgroundGradientFrom: '#fff',
+                backgroundGradientTo: '#fff',
+                decimalPlaces: 1,
+                color: (opacity = 1) => `rgba(37, 99, 235, ${opacity})`,
+                labelColor: (opacity = 1) => `rgba(55, 65, 81, ${opacity})`,
+                style: { borderRadius: 8 },
+                propsForBackgroundLines: { stroke: '#E5E7EB' },
+                propsForLabels: { fontSize: 11 },
+              }}
+              style={{ borderRadius: 8 }}
+            />
+          )}
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
