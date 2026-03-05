@@ -734,7 +734,13 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [changePasswordFeedback, setChangePasswordFeedback] = useState<string | null>(null);
-  const stravaReturnTo = useMemo(() => ExpoLinking.createURL('/'), []);
+  // Para web, defina explicitamente a URL de retorno correta para o frontend
+  const stravaReturnTo = useMemo(() => {
+    if (Platform.OS === 'web') {
+      return 'http://localhost:8081/inicio';
+    }
+    return ExpoLinking.createURL('/');
+  }, []);
 
   const loadStravaStatus = useCallback(async () => {
     try {
@@ -1715,6 +1721,34 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
             <Text style={styles.stravaButtonText}>
               {stravaStatus === 'connected' ? 'Desconectar do Strava' : stravaStatus === 'loading' ? 'Verificando Strava...' : 'Conectar com Strava'}
             </Text>
+          </Pressable>
+
+          {/* Botão para sincronizar dados da bike e percursos do Strava */}
+          <Pressable
+            onPress={async () => {
+              setStravaFeedback(null);
+              setStravaFeedback('Sincronizando bikes do Strava...');
+              try {
+                const bikesResponse = await apiFetchAuth('/strava/gear/bikes/sync', { method: 'POST' });
+                if (bikesResponse.ok) {
+                  setStravaFeedback('Bikes sincronizadas com sucesso! Agora sincronizando percursos...');
+                  const activitiesResponse = await apiFetchAuth('/strava/activities/sync', { method: 'POST' });
+                  if (activitiesResponse.ok) {
+                    setStravaFeedback('Bikes e percursos sincronizados com sucesso!');
+                    void loadStravaStatus();
+                  } else {
+                    setStravaFeedback('Bikes sincronizadas, mas falha ao sincronizar percursos.');
+                  }
+                } else {
+                  setStravaFeedback('Falha ao sincronizar bikes do Strava.');
+                }
+              } catch {
+                setStravaFeedback('Erro de rede ao sincronizar com o Strava.');
+              }
+            }}
+            style={({ pressed }) => [styles.stravaButton, pressed && styles.stravaButtonPressed, { marginTop: 12 }]}
+          >
+            <Text style={styles.stravaButtonText}>Sincronizar dados do Strava</Text>
           </Pressable>
 
           {stravaFeedback ? <Text style={styles.profileFeedback}>{stravaFeedback}</Text> : null}

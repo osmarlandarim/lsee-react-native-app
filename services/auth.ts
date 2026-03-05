@@ -2,6 +2,28 @@ import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
+// Fallback para SecureStore no web usando localStorage
+const isWeb = Platform.OS === 'web';
+const localStore = {
+  async getItemAsync(key: string): Promise<string | null> {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  async setItemAsync(key: string, value: string): Promise<void> {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {}
+  },
+  async deleteItemAsync(key: string): Promise<void> {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {}
+  },
+};
+
 type ApiProfile = {
   usuarioId: string;
   googleId?: string | null;
@@ -465,25 +487,22 @@ export async function resetPasswordWithCode(params: {
 
 export async function getStoredSession(): Promise<AuthSession | null> {
   let raw: string | null = null;
-
   try {
-    raw = await SecureStore.getItemAsync(AUTH_SESSION_KEY);
+    raw = isWeb
+      ? await localStore.getItemAsync(AUTH_SESSION_KEY)
+      : await SecureStore.getItemAsync(AUTH_SESSION_KEY);
   } catch (error) {
     reportSecureStoreError('getItemAsync', error);
     return memorySessionFallback;
   }
-
   if (!raw) {
     return memorySessionFallback;
   }
-
   try {
     const parsed = JSON.parse(raw) as AuthSession;
-
     if (!parsed?.accessToken) {
       return memorySessionFallback;
     }
-
     return parsed;
   } catch {
     return memorySessionFallback;
@@ -492,9 +511,12 @@ export async function getStoredSession(): Promise<AuthSession | null> {
 
 export async function saveStoredSession(session: AuthSession) {
   memorySessionFallback = session;
-
   try {
-    await SecureStore.setItemAsync(AUTH_SESSION_KEY, JSON.stringify(session));
+    if (isWeb) {
+      await localStore.setItemAsync(AUTH_SESSION_KEY, JSON.stringify(session));
+    } else {
+      await SecureStore.setItemAsync(AUTH_SESSION_KEY, JSON.stringify(session));
+    }
   } catch (error) {
     reportSecureStoreError('setItemAsync', error);
   }
@@ -502,9 +524,12 @@ export async function saveStoredSession(session: AuthSession) {
 
 export async function clearStoredSession() {
   memorySessionFallback = null;
-
   try {
-    await SecureStore.deleteItemAsync(AUTH_SESSION_KEY);
+    if (isWeb) {
+      await localStore.deleteItemAsync(AUTH_SESSION_KEY);
+    } else {
+      await SecureStore.deleteItemAsync(AUTH_SESSION_KEY);
+    }
   } catch (error) {
     reportSecureStoreError('deleteItemAsync', error);
   }
