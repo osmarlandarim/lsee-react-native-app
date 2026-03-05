@@ -6,7 +6,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ExpoLinking from 'expo-linking';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, FlatList, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { BarChart } from 'react-native-chart-kit';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { apiFetchAuth } from '@/services/api-client';
@@ -562,6 +563,37 @@ function formatBikeTime(val: string | number | null | undefined): string {
 }
 
 function DetalheBikeScreen({ bike, onBack }: { bike: BikeItem; onBack: () => void }) {
+    const [distanciaMensal, setDistanciaMensal] = useState<Array<{ ano: number; mes: number; soma_distancia: number }>>([]);
+    const [loadingDistancia, setLoadingDistancia] = useState(true);
+    const [erroDistancia, setErroDistancia] = useState<string | null>(null);
+
+    useEffect(() => {
+      let isMounted = true;
+      async function fetchDistanciaMensal() {
+        setLoadingDistancia(true);
+        setErroDistancia(null);
+        try {
+          const response = await apiFetchAuth(`/percursos/soma-distancia-mensal?bikeId=${bike.id}`);
+          if (!response.ok) {
+            setErroDistancia(`Erro ao buscar distâncias mensais (${response.status})`);
+            setDistanciaMensal([]);
+            setLoadingDistancia(false);
+            return;
+          }
+          const payload = await response.json();
+          if (isMounted) {
+            setDistanciaMensal(Array.isArray(payload) ? payload : []);
+          }
+        } catch (e) {
+          setErroDistancia('Erro ao buscar distâncias mensais.');
+          setDistanciaMensal([]);
+        } finally {
+          setLoadingDistancia(false);
+        }
+      }
+      fetchDistanciaMensal();
+      return () => { isMounted = false; };
+    }, [bike.id]);
   const [resumo, setResumo] = useState<BikeResumo | null>(null);
   const [status, setStatus] = useState('Carregando resumo...');
 
@@ -705,6 +737,46 @@ function DetalheBikeScreen({ bike, onBack }: { bike: BikeItem; onBack: () => voi
           </View>
         </View>
       ) : null}
+
+      {/* Gráfico de barras de distância mensal */}
+      <View style={{ marginTop: 18, marginBottom: 8 }}>
+        <Text style={styles.resumoSectionTitle}>Distância mensal (km)</Text>
+        {loadingDistancia ? (
+          <ActivityIndicator size="small" color="#2563eb" style={{ marginTop: 12 }} />
+        ) : erroDistancia ? (
+          <Text style={{ color: '#B91C1C', marginTop: 8 }}>{erroDistancia}</Text>
+        ) : distanciaMensal.length === 0 ? (
+          <Text style={{ color: '#6B7280', marginTop: 8 }}>Sem dados de distância mensal.</Text>
+        ) : (
+          <BarChart
+            data={{
+              labels: distanciaMensal.map(item => `${item.mes.toString().padStart(2, '0')}/${item.ano.toString().slice(-2)}`),
+              datasets: [
+                {
+                  data: distanciaMensal.map(item => Number(item.soma_distancia) || 0),
+                },
+              ],
+            }}
+            width={Math.min(Dimensions.get('window').width - 36, 480)}
+            height={220}
+            yAxisSuffix=" km"
+            fromZero
+            showValuesOnTopOfBars
+            chartConfig={{
+              backgroundColor: '#fff',
+              backgroundGradientFrom: '#fff',
+              backgroundGradientTo: '#fff',
+              decimalPlaces: 1,
+              color: (opacity = 1) => `rgba(37, 99, 235, ${opacity})`,
+              labelColor: (opacity = 1) => `rgba(55, 65, 81, ${opacity})`,
+              style: { borderRadius: 8 },
+              propsForBackgroundLines: { stroke: '#E5E7EB' },
+              propsForLabels: { fontSize: 11 },
+            }}
+            style={{ borderRadius: 8 }}
+          />
+        )}
+      </View>
     </ScrollView>
   );
 }
