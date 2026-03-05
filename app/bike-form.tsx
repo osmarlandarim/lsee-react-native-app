@@ -35,12 +35,16 @@ export default function BikeFormScreen() {
   const [ativo, setAtivo] = useState(params.ativo ?? true);
   const [apelido, setApelido] = useState(params.apelido || '');
   const [totalKm, setTotalKm] = useState(params.totalKm ? String(params.totalKm) : '');
-  const [principal, setPrincipal] = useState(!!params.principal);
+  const [principal, setPrincipal] = useState(
+    params.principal === true
+      ? true
+      : false
+  );
   const [cor, setCor] = useState(params.cor || '');
   const [tamanhoRoda, setTamanhoRoda] = useState(params.tamanhoRoda ? String(params.tamanhoRoda) : '');
   const [ano, setAno] = useState(params.ano ? String(params.ano) : '');
   const [peso, setPeso] = useState(params.peso ? String(params.peso) : '');
-  const [numeroSerie, setNumeroSerie] = useState(params.numeroSerie || '');
+  const [numeroSerie, setNumeroSerie] = useState(params.numeroSerie ?? null);
   const [visivel, setVisivel] = useState(params.visivel ?? true);
   const [marcaId, setMarcaId] = useState(params.marcaId || '');
   const [marcas, setMarcas] = useState<Marca[]>([]);
@@ -92,7 +96,7 @@ export default function BikeFormScreen() {
         totalKm: totalKm ? Number(totalKm) : null,
         principal: Boolean(principal),
         cor,
-        tamanhoRoda: tamanhoRoda ? Number(tamanhoRoda) : null,
+        tamanhoRoda: tamanhoRoda ? parseFloat(tamanhoRoda.replace(',', '.')) : null,
         ano: ano ? Number(ano) : null,
         peso: peso ? Number(peso) : null,
         numeroSerie: numeroSerie || null,
@@ -138,7 +142,7 @@ export default function BikeFormScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>{isEdit ? 'Editar Bike' : 'Cadastrar Bike'}</Text>
+      <Text style={styles.title}>{apelido.trim() ? apelido : (isEdit ? 'Bike' : 'Nova Bike')}</Text>
       <Text style={styles.label}>Apelido</Text>
       <TextInput style={styles.input} value={apelido} onChangeText={setApelido} placeholder="Nome da bike" />
 
@@ -149,7 +153,13 @@ export default function BikeFormScreen() {
       <TextInput style={styles.input} value={cor} onChangeText={setCor} placeholder="Cor da bike" />
 
       <Text style={styles.label}>Tamanho da roda</Text>
-      <TextInput style={styles.input} value={tamanhoRoda} onChangeText={setTamanhoRoda} placeholder="Ex: 29" keyboardType="numeric" />
+      <TextInput
+        style={styles.input}
+        value={tamanhoRoda}
+        onChangeText={setTamanhoRoda}
+        placeholder="Ex: 29.5"
+        keyboardType="decimal-pad"
+      />
 
       <Text style={styles.label}>Ano</Text>
       <TextInput style={styles.input} value={ano} onChangeText={setAno} placeholder="Ex: 2022" keyboardType="numeric" />
@@ -158,7 +168,7 @@ export default function BikeFormScreen() {
       <TextInput style={styles.input} value={peso} onChangeText={setPeso} placeholder="Ex: 12.5" keyboardType="numeric" />
 
       <Text style={styles.label}>Número de série</Text>
-      <TextInput style={styles.input} value={numeroSerie} onChangeText={setNumeroSerie} placeholder="Número de série" />
+      <TextInput style={styles.input} value={numeroSerie ?? ''} onChangeText={setNumeroSerie} placeholder="Número de série" />
 
       <View style={styles.checkRow}>
         <CheckBox label="Ativo" checked={ativo} onChange={setAtivo} />

@@ -490,7 +490,9 @@ function HomeScreen() {
             <View style={styles.bikeHeaderRow}>
               <Text style={styles.bikeName}>{item.apelido?.trim() || 'Bike sem apelido'}</Text>
               <View style={styles.bikeHeaderActions}>
-                {item.principal ? <Text style={styles.bikePrincipal}>Principal</Text> : null}
+                {item.principal === true && (
+                  <Text style={styles.bikePrincipal}>Principal</Text>
+                )}
 
                 <Pressable
                   onPress={(event) => {
@@ -1668,7 +1670,20 @@ function PerfilScreen({ session, onSignOut }: BottomTabNavigationProps) {
           </View>
 
           <View style={styles.profileHeaderBlock}>
-            {profile.picture ? <Image source={{ uri: profile.picture }} style={styles.avatar} /> : null}
+            {profile.picture ? (
+              <Image
+                source={{ uri: profile.picture }}
+                style={styles.avatar}
+                onError={() => {
+                  // Remove a imagem se não carregar
+                  profile.picture = null;
+                }}
+              />
+            ) : (
+              <View style={[styles.avatar, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#E5E7EB' }]}> 
+                <Ionicons name="person-circle-outline" size={48} color="#9CA3AF" />
+              </View>
+            )}
             <Text style={styles.title}>{profile.name ?? 'Usuário'}</Text>
             <Text style={styles.profileEmail}>{profile.email ?? 'E-mail não disponível'}</Text>
           </View>
